@@ -1,34 +1,17 @@
 #!/usr/bin/env node
 /** FDA Quick — guardrailed small change: build → quality → quick-log → commit. */
-import { readdirSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { runFda, phaseParams } from './modules/fda-cli.mjs';
 import { artifactsExist } from './modules/gates.mjs';
 import { defaultSpecs, focalSpec, runQuality, asEnvelope } from './modules/quality.mjs';
 import { appendQuickLog, setQuickLogCommit } from './modules/quicklog.mjs';
 import { OUTCOMES } from './modules/outcome.mjs';
+import { builderDeclaredFiles } from './modules/utils.mjs';
 import * as git from './modules/git-helper.mjs';
 
-/** Files declared by the persisted builder envelopes (build + fix) — see fda_plan_build_test. */
-function builderDeclaredFiles(run) {
-  const files = [];
-  let names = [];
-  try {
-    names = readdirSync(run.phaseResultsDir);
-  } catch {
-    /* no phase results dir — nothing persisted */
-  }
-  for (const name of names) {
-    if (!/^(build|fix)\.json$/.test(name)) continue;
-    try {
-      const saved = JSON.parse(readFileSync(join(run.phaseResultsDir, name), 'utf8'));
-      files.push(...(saved.result?.changed_files || []), ...(saved.result?.artifacts || []));
-    } catch {
-      /* unreadable phase result — the in-memory envelopes still cover the rest */
-    }
-  }
-  return files;
-}
+/** This runner has a single fix round, persisted as `fix.json`. */
+const QUICK_RESULT_FILES = /^(build|fix)\.json$/;
 
 /** The persisted result of an earlier phase of this fda_id, or null. */
 function savedPhaseResult(run, name) {
@@ -105,7 +88,7 @@ await runFda(
 
     if (quality.passed) {
       const files = [
-        ...new Set([...(build.changed_files || []), ...(build.artifacts || []), ...builderDeclaredFiles(run)]),
+        ...new Set([...(build.changed_files || []), ...(build.artifacts || []), ...builderDeclaredFiles(run, QUICK_RESULT_FILES)]),
       ];
       const logPath = join(process.env.FIA_AI_DOCS || 'ai-docs', 'todos', 'quick-log.md');
       const logged = await run.runPhase(

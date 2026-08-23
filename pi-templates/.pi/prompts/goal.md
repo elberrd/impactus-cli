@@ -49,7 +49,15 @@ Loop, until no unblocked task remains:
    evidence earns `PASS`. It blocks on missing or
    invalid contracts, failed Playwright evidence, or a failed design audit.
    An API-only milestone exits 0 with a durable `Status: skipped` report and
-   its reason. QA exit 0 → report the QA report path and continue. QA exit != 0
+   its reason. QA exit 0 → report the QA report path, then drain the
+   milestone's documentation in ONE call (per-task runs skip their
+   `document` phase by default — `sdlc.document: per_milestone`):
+
+   ```bash
+   node imp/fda_document.mjs "Document milestone <milestone-id>: what shipped across its tasks — read ai-docs/milestones.md and the completed briefs in ai-docs/todos/, write/update the docs, and commit them"
+   ```
+
+   — and continue. QA exit != 0
    → **STOP the goal**; show the phase, rule id/evidence, and artifact path.
    Never silently defer QA, continue into the next milestone, or mark a failed
    milestone complete. This automatic boundary supersedes the cookbook's

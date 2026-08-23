@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** FDA Bug — plan → failing reproduction (valid RED) → fix → green suite → commit. */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runFda, phaseParams } from './modules/fda-cli.mjs';
 import { artifactsExist, filesNonEmpty, validateRedReason, parseSpecLine, checkSpecCoverage, checkSpecDiagram } from './modules/gates.mjs';
@@ -11,32 +11,11 @@ import { floorPath } from './modules/floor.mjs';
 import { runSpecDeliveryClose } from './modules/spec-lifecycle.mjs';
 import { OUTCOMES } from './modules/outcome.mjs';
 import { changedContentSignature, createRepairTracker } from './modules/stop.mjs';
+import { builderDeclaredFiles } from './modules/utils.mjs';
 import * as git from './modules/git-helper.mjs';
 
-/**
- * Files declared by EVERY persisted builder envelope (red_test + build +
- * fix_N). Same reason as fda_plan_build_test: on resume the in-memory
- * envelopes may not cover earlier rounds — phase_results always do.
- */
-function builderDeclaredFiles(run) {
-  const files = [];
-  let names = [];
-  try {
-    names = readdirSync(run.phaseResultsDir);
-  } catch {
-    /* no phase results dir — nothing persisted */
-  }
-  for (const name of names) {
-    if (!/^(red_test|build|fix_\d+|fix_checklist|fix_ui)\.json$/.test(name)) continue;
-    try {
-      const saved = JSON.parse(readFileSync(join(run.phaseResultsDir, name), 'utf8'));
-      files.push(...(saved.result?.changed_files || []), ...(saved.result?.artifacts || []));
-    } catch {
-      /* unreadable phase result — the in-memory envelopes still cover the rest */
-    }
-  }
-  return files;
-}
+/** This runner's builder rounds include the RED reproduction test. */
+const BUG_RESULT_FILES = /^(red_test|build|fix_\d+|fix_checklist|fix_ui)\.json$/;
 
 /** A phase that already ran in this fda_id (its result file is on disk). */
 function phaseAlreadyRan(run, name) {
@@ -280,7 +259,7 @@ await runFda(
               ...redFiles,
               ...(previous.changed_files || []),
               ...(previous.artifacts || []),
-              ...builderDeclaredFiles(run),
+              ...builderDeclaredFiles(run, BUG_RESULT_FILES),
               ...(specClose.changed_files || []),
               // The regression floor rises on a green suite (modules/floor.mjs)
               // and rides the SAME commit as the work that raised it.

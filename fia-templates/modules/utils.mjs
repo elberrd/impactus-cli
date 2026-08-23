@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, existsSync, realpathSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, realpathSync } from 'node:fs';
 import { mkdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export function newId(length = 8) {
@@ -26,6 +26,38 @@ export function resolvePrompt(arg) {
     /* inline text */
   }
   return arg;
+}
+
+/** Result files every tested FDA's builder rounds persist (build + repairs). */
+export const BUILDER_RESULT_FILES = /^(build|fix_\d+|fix_checklist|fix_ui)\.json$/;
+
+/**
+ * Files declared by EVERY persisted builder envelope of a run. On resume the
+ * in-memory `previous` can be just the replayed build envelope (the code test
+ * phases re-run and pass because the fix is already on disk, so the fix loop
+ * never executes) — files touched by earlier repair rounds live only in
+ * phase_results, so the commit set must be collected from disk. FDAs whose
+ * builder phases differ (red_test in /bug, the single `fix` of /quick and
+ * /prototype) pass their own pattern.
+ */
+export function builderDeclaredFiles(run, filePattern = BUILDER_RESULT_FILES) {
+  const files = [];
+  let names = [];
+  try {
+    names = readdirSync(run.phaseResultsDir);
+  } catch {
+    /* no phase results dir — nothing persisted */
+  }
+  for (const name of names) {
+    if (!filePattern.test(name)) continue;
+    try {
+      const saved = JSON.parse(readFileSync(join(run.phaseResultsDir, name), 'utf8'));
+      files.push(...(saved.result?.changed_files || []), ...(saved.result?.artifacts || []));
+    } catch {
+      /* unreadable phase result — the in-memory envelopes still cover the rest */
+    }
+  }
+  return files;
 }
 
 export function engineerName() {
