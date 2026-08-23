@@ -13,7 +13,7 @@
  * relay) reads them. All marker IO is best-effort: a run must never fail
  * because a marker could not be read or written.
  */
-import { readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 export const ENGINE_ERROR_FILE = 'engine_error.json';
@@ -183,6 +183,52 @@ export function appendVerdictHistory(sessionDir, verdict) {
     /* best-effort: an unwritable ledger under-counts the budget, nothing more */
   }
   return history;
+}
+
+/**
+ * The durable ledger of BARE resumes — `--resume` with no verdict recorded.
+ * Verdict-driven recoveries are counted by VERDICT_HISTORY_FILE; before this
+ * ledger existed, a bare resume consumed NO budget at all, which is exactly
+ * how a real run re-ran 16 build cycles. The combined ceiling below closes
+ * that bypass.
+ */
+export const RESUME_HISTORY_FILE = 'resume_history.json';
+
+/**
+ * Total recoveries a single run may consume across BOTH ledgers (verdicts +
+ * bare resumes) before a human must decide. Above the per-mechanism verdict
+ * cap on purpose: a healthy mixed recovery gets room, a loop does not.
+ */
+export const RECOVERY_CAP = 8;
+
+export function readResumeHistory(sessionDir) {
+  try {
+    const history = JSON.parse(readFileSync(join(sessionDir, RESUME_HISTORY_FILE), 'utf8'));
+    if (Array.isArray(history)) return history;
+  } catch {
+    /* no history */
+  }
+  return [];
+}
+
+/** Best-effort append, same failure mode as the verdict ledger (under-count). */
+export function appendResumeHistory(sessionDir, entry) {
+  const history = readResumeHistory(sessionDir);
+  history.push(entry);
+  try {
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, RESUME_HISTORY_FILE), JSON.stringify(history, null, 2));
+  } catch {
+    /* best-effort: an unwritable ledger under-counts the budget, nothing more */
+  }
+  return history;
+}
+
+/** The run's combined recovery spend, for the RECOVERY_CAP ceiling. */
+export function recoveryLedger(sessionDir) {
+  const verdicts = readVerdictHistory(sessionDir).length;
+  const bareResumes = readResumeHistory(sessionDir).length;
+  return { verdicts, bareResumes, total: verdicts + bareResumes };
 }
 
 /**

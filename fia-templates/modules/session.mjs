@@ -4,7 +4,17 @@ import { Tracer } from './tracer.mjs';
 import { Run } from './runner.mjs';
 import { engineerName, newId, nowIso } from './utils.mjs';
 import { resolveEngines } from './engines.mjs';
-import { clearRunVerdict, readEngineErrors, readRunVerdict, relayModeOf, shouldArmFallback } from './continuation.mjs';
+import {
+  RECOVERY_CAP,
+  appendResumeHistory,
+  clearRunVerdict,
+  readEngineErrors,
+  readRunVerdict,
+  recoveryLedger,
+  relayModeOf,
+  shouldArmFallback,
+} from './continuation.mjs';
+import { readFailureStamp, repoStamp } from './tree-guard.mjs';
 import { manualStopState } from './stop.mjs';
 
 function pidAlive(pid) {
@@ -114,7 +124,7 @@ export function acquireLock(dataDir, fdaId) {
   );
 }
 
-export function ensure(cfg, fdaId = null, { resume = false } = {}) {
+export function ensure(cfg, fdaId = null, { resume = false, retryUnchanged = false } = {}) {
   if (resume && !fdaId) throw new Error('resume requires the fda_id of the failed run');
   const dataDir = cfg.defaults?.data_dir || 'imp/data';
 
@@ -132,6 +142,45 @@ export function ensure(cfg, fdaId = null, { resume = false } = {}) {
         'No FDA run starts while it is in place. Disarm it first:\n' +
         '  imp stop --clear      (or: npm run fda:stop -- --clear)',
     );
+  }
+
+  // A BARE resume of a FAILED run — no verdict recorded, no engine death to
+  // recover from — is refused while the tree is provably identical to the one
+  // that failed: re-running everything cannot end differently, and this exact
+  // uncounted loop once re-ran 16 build cycles on a real project. Exemptions
+  // are the legitimate recoveries: a pending verdict (bounded continuation),
+  // an armed engine-death marker (relay), or the human's --retry-unchanged.
+  // Every bare resume also spends the run's combined recovery budget, so the
+  // verdict cap cannot be bypassed by resuming without one.
+  if (resume && fdaId) {
+    const sessionDir = join(dataDir, 'sessions', fdaId);
+    const failure = readFailureStamp(sessionDir);
+    const hasVerdict = Boolean(readRunVerdict(sessionDir));
+    const engineDeath = Object.values(readEngineErrors(sessionDir)).some(shouldArmFallback);
+    if (failure && !hasVerdict && !engineDeath) {
+      const ledger = recoveryLedger(sessionDir);
+      if (ledger.total >= RECOVERY_CAP) {
+        throw new Error(
+          `run ${fdaId} has spent its combined recovery budget: ${ledger.verdicts} verdict(s) + ${ledger.bareResumes} bare resume(s) >= ${RECOVERY_CAP}.\n` +
+            'More resumes of THIS run would only repeat the loop. Convert what is still missing into a\n' +
+            'follow-up task instead: have the task-sequencer write a NEW brief for the remaining gaps\n' +
+            '(a fresh run starts with small sessions and clean context) — or fix the code by hand.',
+        );
+      }
+      const stamp = repoStamp(process.cwd());
+      const unchanged = Boolean(stamp && failure.stamp === stamp);
+      if (unchanged && !retryUnchanged) {
+        throw new Error(
+          `nothing changed in the repository since run ${fdaId} failed (${failure.outcome}) — resuming would repeat the same failure.\n` +
+            'Pick one:\n' +
+            '  - fix the code by hand, then resume;\n' +
+            '  - record what is missing so the resume is BOUNDED:  node imp/scripts/verdict.mjs set ' +
+            `${fdaId} --missing "<gap>"\n` +
+            '  - genuinely flaky failure? force it:  --retry-unchanged',
+        );
+      }
+      appendResumeHistory(sessionDir, { at: nowIso(), bare: true, unchanged, overridden: unchanged && retryUnchanged });
+    }
   }
 
   // Engine resolution happens before anything is traced: agents whose engine

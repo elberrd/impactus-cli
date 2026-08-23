@@ -13,6 +13,7 @@ export function parseFdaArgs(argv, { agentDefault } = {}) {
       config: { type: 'string', default: 'imp/fia.config.yaml' },
       'fda-id': { type: 'string' },
       resume: { type: 'boolean', default: false },
+      'retry-unchanged': { type: 'boolean', default: false },
       agent: { type: 'string', default: agentDefault },
       debug: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h' },
@@ -23,6 +24,8 @@ export function parseFdaArgs(argv, { agentDefault } = {}) {
     console.log('Usage: node imp/fda_*.mjs "<prompt>" [--config imp/fia.config.yaml] [--fda-id id] [--resume] [--debug]');
     console.log('  --resume  with --fda-id: skip phases that already succeeded in that run (reuses saved results).');
     console.log('            The prompt may be omitted — the one saved with the original run is reused.');
+    console.log('  --retry-unchanged  with --resume: override the unchanged-tree guard (a failed run');
+    console.log('            whose tree has not moved is otherwise refused — re-running cannot pass).');
     console.log('  --debug   print the full technical stack trace when a run fails');
     console.log('  Agent phases get 1 automatic correction round by default when a gate fails (retries: 1).');
     process.exit(0);
@@ -42,6 +45,7 @@ export function parseFdaArgs(argv, { agentDefault } = {}) {
     config: values.config,
     fdaId: values['fda-id'] || null,
     resume: values.resume,
+    retryUnchanged: values['retry-unchanged'],
     agent: values.agent,
     debug: values.debug,
   };
@@ -132,7 +136,10 @@ export async function runFda(main, { agents = [], agentDefault } = {}) {
     }
     const required = typeof agents === 'function' ? agents(args) : agents;
     if (required.length) validate(cfg, required);
-    run = ensure(cfg, args.fdaId, { resume: args.resume });
+    run = ensure(cfg, args.fdaId, { resume: args.resume, retryUnchanged: args.retryUnchanged });
+    // Surfaced on the run so gates deep in the phase flow (ui_verify) can
+    // honor the same override without re-parsing argv.
+    run.retryUnchanged = args.retryUnchanged;
     const prompt = resolvePrompt(args.prompt);
     const exitCode = await main({ run, cfg, prompt, args });
     await announceRunEnd(run, cfg);

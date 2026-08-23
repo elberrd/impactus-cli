@@ -65,19 +65,29 @@ Loop, until no unblocked task remains:
 
 4. exit != 0 → recover automatically while the run is making PROGRESS
    (cookbook `harness_bridge`, "On failure"): each failure that names a
-   NEW gap an FDA can apply — or a recommended plain re-run — is yours
-   to repair without asking (`--fda-id … --resume`, with a verdict
-   `--missing` naming the gap). Report each recovery to me in one line
-   (what failed → what you fixed) and continue. Fixing one gate
+   NEW gap an FDA can apply is yours to repair without asking
+   (`--fda-id … --resume`, with a verdict `--missing` naming the gap).
+   A plain re-run is legitimate ONLY when the tree changed since the
+   failure or an engine died — the runner now REFUSES a bare resume
+   over an identical tree, and counts every bare resume against the
+   run's combined recovery budget. Treat any such refusal as
+   STOP-and-ask, never work around it (`--retry-unchanged` is the
+   engineer's override, not yours). Report each recovery to me in one
+   line (what failed → what you fixed) and continue. Fixing one gate
    violation often reveals the next; that chain is progress, walk it.
+   From the THIRD recovery of the same run onward, prefer converting
+   the remaining gaps into a FOLLOW-UP brief via the task-sequencer —
+   a fresh run starts with small sessions and clean context, resuming
+   a long run re-opens its giant sessions at full width.
    STOP only when: the SAME violation comes back (no progress), the
    outcome is `no_progress` / `attempt_cap` / `budget_exhausted` /
-   `engine_exhausted`, or `verdict.mjs set` refuses because the run's
-   recovery budget is spent (that cap is enforced in code — never
-   work around it). On STOP: show the phase, the gate violations, the
-   trace AND your recommended fix. I decide: fix, skip or re-run — and
-   if I answer "continue" (or equivalent), that IS the authorization
-   for exactly the fix you recommended: execute it, never re-ask.
+   `engine_exhausted`, or `verdict.mjs set` / the resume itself refuses
+   because the run's recovery budget is spent (both caps are enforced
+   in code — never work around them). On STOP: show the phase, the gate
+   violations, the trace AND your recommended fix. I decide: fix, skip
+   or re-run — and if I answer "continue" (or equivalent), that IS the
+   authorization for exactly the fix you recommended: execute it,
+   never re-ask.
 
 Briefs with a `Spec: NNNN (…)` line arm the FDA's spec-coverage gate — on
 success, check the spec's Traceability table reflects the new tests and flag

@@ -1,6 +1,7 @@
 import { phaseParams } from './fda-cli.mjs';
 import { artifactsExist, verdictConsistent, parseSurfaceLine } from './gates.mjs';
 import { runTestsForBrief } from './quality.mjs';
+import { clearAttempt, readAttempt, recordAttemptFailure, repoStamp, unchangedSinceFailure } from './tree-guard.mjs';
 import * as git from './git-helper.mjs';
 import { verifyUiKitReceipt } from './ui-kit-receipt.mjs';
 import {
@@ -305,8 +306,21 @@ export async function runUiGate(run, prompt) {
       retries: 1,
       replay: false,
     }),
-    async (ph) =>
-      ph.call({
+    async (ph) => {
+      // Unchanged-retry guard (same rule as the /qa phases): re-execution is
+      // only honest when the tree could have changed — a rejected verify over
+      // the EXACT same tree can only reject again, so refuse before spending
+      // the reviewer call. Fails open without git.
+      const stamp = repoStamp(run.repoRoot);
+      const prior = readAttempt(run.sessionDir, 'ui-verify');
+      if (unchangedSinceFailure({ prior, stamp, override: run.retryUnchanged })) {
+        throw new Error(
+          `ui_verify already rejected this exact tree ${prior.count === 1 ? 'once' : `${prior.count} times`} — nothing changed in the repo since, so re-verifying cannot approve.\n` +
+            'Fix the remaining violations by hand (they are listed in the previous failure), then resume;\n' +
+            'a deliberate re-verify of the same tree needs --retry-unchanged.',
+        );
+      }
+      const verdict = await ph.call({
         outputType: 'ReviewOutput',
         prompt: verifyPrompt(
           [...new Set([...scope.uiFiles, ...(fix.changed_files || []).filter((f) => FRONTEND_FILE.test(f))])],
@@ -314,7 +328,11 @@ export async function runUiGate(run, prompt) {
         ),
         previous: fix,
         gates: [verdictConsistent],
-      }),
+      });
+      if (verdict.approved) clearAttempt(run.sessionDir, 'ui-verify');
+      else recordAttemptFailure(run.sessionDir, 'ui-verify', stamp);
+      return verdict;
+    },
   );
 
   await run.runPhase(

@@ -6,6 +6,7 @@ import { execute } from './agents.mjs';
 import { loadOrCreateBaseline, runChangedPaths } from './git-helper.mjs';
 import { nowIso } from './utils.mjs';
 import { stopPolicyOf, StopCondition, manualStopState } from './stop.mjs';
+import { clearFailureStamp, repoStamp, writeFailureStamp } from './tree-guard.mjs';
 import { OUTCOMES, classifyFailure, isTerminalOutcome, outcomeIsSuccess } from './outcome.mjs';
 
 /** The fda_*.mjs that is running, for the recovery lines finish() prints. */
@@ -128,6 +129,14 @@ export class Run {
     this.outcome = outcome;
     this.outcomeReason = String(reason || '');
     const accepted = outcomeIsSuccess(outcome);
+    // The tree fingerprint of a FAILED run: session.ensure() refuses a bare
+    // --resume while the tree has not moved (re-running is provably futile).
+    // Deliberate pauses are exempt — a manual stop or a spent budget resumes
+    // legitimately unchanged (the human raises the knob / disarms the button),
+    // and an aborted run may have died before the tree tells the story.
+    const NO_STAMP = new Set([OUTCOMES.STOPPED_BY_REQUEST, OUTCOMES.ABORTED, OUTCOMES.BUDGET_EXHAUSTED]);
+    if (accepted) clearFailureStamp(this.sessionDir);
+    else if (!NO_STAMP.has(outcome)) writeFailureStamp(this.sessionDir, { stamp: repoStamp(this.repoRoot), outcome });
     try {
       this.tracer.event({
         fda_id: this.fdaId,
