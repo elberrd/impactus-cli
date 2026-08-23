@@ -215,6 +215,20 @@ export class Tracer {
   }
 
   /**
+   * Lifetime tokens already recorded for this session across every attempt —
+   * the baseline the run-level token budget counts from on --resume. Fails
+   * OPEN (0): an unreadable row must degrade the guard, never block a run.
+   */
+  sessionTokens(fdaId) {
+    try {
+      const row = this.db.prepare('SELECT total_tokens FROM sessions WHERE fda_id=?').get(fdaId);
+      return Number(row?.total_tokens) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
    * Close the session. `outcome` is the NAMED terminal reason (see
    * modules/outcome.mjs); it is written only when non-empty, so a later, more
    * precise settle is never overwritten by a vaguer one — and every existing

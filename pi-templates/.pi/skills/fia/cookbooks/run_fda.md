@@ -44,9 +44,15 @@ news, not a defect:
 - `attempt_cap` — the loop spent its `stop.attempt_cap` rounds (default 3) with
   the suite still red.
 
-`budget_exhausted` and `breadth_exceeded` are off by default. All four live in
-the optional `stop:` block of `imp/fia.config.yaml`; the code defaults apply when
-it is absent, so never tell the engineer they must add it.
+`breadth_exceeded` and the wall-clock `budget_minutes` are off by default. The
+TOKEN budgets ship ON with generous room: `stop.token_budget` (30M for the run
+lifetime, resumes included — warned at 50%/80%) and `stop.phase_token_budget`
+(8M for one phase, cut mid-send), plus `stop.phase_timeout_minutes` (50) for a
+hung engine. A run stopped as `budget_exhausted` is the guard working: report
+the spend, and let the engineer decide between fixing the approach and raising
+the knob — never raise it yourself. All keys live in the optional `stop:` block
+of `imp/fia.config.yaml`; the code defaults apply when it is absent, so never
+tell the engineer they must add it.
 
 A `session_rotation` log line in a run is normal, not a defect: past
 `defaults.session_rotation_context` (default 180k tokens of live context) the

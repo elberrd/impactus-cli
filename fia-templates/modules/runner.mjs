@@ -101,6 +101,12 @@ export class Run {
     // condition, a gate, a signal) must never be overwritten by the vaguer
     // one that follows it up the stack.
     this.stop = stopPolicyOf(cfg);
+    // Lifetime spend across ALL attempts of this fda_id: the token budget is a
+    // RUN-lifetime ceiling, so a resume must not reset the meter (that reset
+    // is exactly how a real run re-burned 8 identical expensive rounds).
+    // Fails open — an unreadable session row reads as 0.
+    this.tokensBaseline = resume ? tracer.sessionTokens(fdaId) : 0;
+    this._budgetWarned = new Set();
     this.startedAtMs = Date.now();
     this.settled = false;
     this.outcome = null;
@@ -182,6 +188,9 @@ export class Run {
         );
       }
     }
+    if (!stop && this.stop.token_budget > 0 && this.lifetimeTokens() >= this.stop.token_budget) {
+      stop = new StopCondition(OUTCOMES.BUDGET_EXHAUSTED, this.#tokenBudgetMessage());
+    }
     if (!stop && this.stop.breadth_ceiling > 0) {
       const changed = runChangedPaths(this.repoRoot, this.baseline).length;
       if (changed > this.stop.breadth_ceiling) {
@@ -200,6 +209,63 @@ export class Run {
   saveAgentMap(agent, entry) {
     this.agentMap[agent] = entry;
     writeFileSync(this._agentMapPath, JSON.stringify(this.agentMap, null, 2));
+  }
+
+  /** Tokens spent across every attempt of this run, this process included. */
+  lifetimeTokens() {
+    return this.tokensBaseline + this.tokens;
+  }
+
+  #tokenBudgetMessage() {
+    return (
+      `the token budget of ${this.stop.token_budget} is used up ` +
+      `(${this.lifetimeTokens()} spent across all attempts of this run) — ` +
+      'stopping instead of spending more of your plan'
+    );
+  }
+
+  /**
+   * Token ceilings, checked BETWEEN SENDS by the agent layer (doSend) — the
+   * between-phase check alone cannot stop a phase that is already running
+   * away (a real project recorded a single 36M-token phase). Throws a
+   * StopCondition, settled here so the precise reason survives the stack.
+   * Warnings at 50% and 80% of the run budget print once each.
+   */
+  checkTokenBudget({ phaseTokens = 0 } = {}) {
+    if (this.stop.token_budget > 0) {
+      const spent = this.lifetimeTokens();
+      for (const pct of [50, 80]) {
+        if (spent >= (this.stop.token_budget * pct) / 100 && !this._budgetWarned.has(pct)) {
+          this._budgetWarned.add(pct);
+          this.console.note(`token budget: ${spent} of ${this.stop.token_budget} spent (past ${pct}%)`);
+          try {
+            this.tracer.event({
+              fda_id: this.fdaId,
+              phase_id: this.phases.at(-1)?.phase_id || '',
+              type: 'log',
+              name: 'budget_warning',
+              payload: { spent, budget: this.stop.token_budget, pct },
+            });
+          } catch {
+            /* tracing must never block the run */
+          }
+        }
+      }
+      if (spent >= this.stop.token_budget) {
+        const stop = new StopCondition(OUTCOMES.BUDGET_EXHAUSTED, this.#tokenBudgetMessage());
+        this.settle(stop.outcome, stop.message);
+        throw stop;
+      }
+    }
+    if (this.stop.phase_token_budget > 0 && phaseTokens >= this.stop.phase_token_budget) {
+      const stop = new StopCondition(
+        OUTCOMES.BUDGET_EXHAUSTED,
+        `this phase alone spent ${phaseTokens} tokens, at or over the per-phase budget of ` +
+          `${this.stop.phase_token_budget} — stopping instead of letting one phase spend the whole plan`,
+      );
+      this.settle(stop.outcome, stop.message);
+      throw stop;
+    }
   }
 
   addUsage(tokens, cost) {

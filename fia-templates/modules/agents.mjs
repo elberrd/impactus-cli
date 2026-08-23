@@ -9,6 +9,8 @@ import * as permissions from './permissions.mjs';
 import * as continuation from './continuation.mjs';
 import { checkEngines, engineIssue } from './engines.mjs';
 import { runChangedPaths } from './git-helper.mjs';
+import { StopCondition } from './stop.mjs';
+import { OUTCOMES } from './outcome.mjs';
 import { makeStreamRecorder } from './stream-events.mjs';
 import { extractJson, getOutputSchema } from './envelopes.mjs';
 import { gateReport } from './gates.mjs';
@@ -184,6 +186,7 @@ async function send(run, phase, agent, promptText, systemText, sessionMeta) {
         effort: agent.effort,
         thinking: agent.thinking,
         sessionId: sessionMeta.sessionId,
+        limits: sessionMeta.limits,
         rawOutputPath,
         cwd: run.repoRoot,
         env: run.env,
@@ -203,6 +206,7 @@ async function send(run, phase, agent, promptText, systemText, sessionMeta) {
         systemPrompt: systemText,
         model: agent.model,
         sessionId: sessionMeta.sessionId,
+        limits: sessionMeta.limits,
         rawOutputPath,
         cwd: run.repoRoot,
         env: run.env,
@@ -222,6 +226,7 @@ async function send(run, phase, agent, promptText, systemText, sessionMeta) {
       model: agent.model,
       thinking: agent.thinking || 'medium',
       sessionFile,
+      limits: sessionMeta.limits,
       rawOutputPath,
       tools: agent.tools,
       extensions: agent.harness_engineering || [],
@@ -659,6 +664,27 @@ export async function execute(run, phase, call) {
 }
 
 /**
+ * A timeout that already burned this many tokens was doing real work — it
+ * stops the run instead of being retried as a crash (re-spending it all).
+ */
+const TIMEOUT_STOP_TOKENS = 500000;
+
+/**
+ * Adapter-enforced ceilings for ONE send: the phase wall-clock timeout plus
+ * whatever token room is left under the per-phase and per-run budgets — the
+ * adapter cuts the child mid-send at the tighter one (agent-limits.mjs).
+ */
+function phaseLimits(run, spentSoFar) {
+  const limits = {};
+  if (run.stop?.phase_timeout_minutes > 0) limits.timeoutMs = run.stop.phase_timeout_minutes * 60000;
+  const remaining = [];
+  if (run.stop?.phase_token_budget > 0) remaining.push(Math.max(1, run.stop.phase_token_budget - spentSoFar));
+  if (run.stop?.token_budget > 0) remaining.push(Math.max(1, run.stop.token_budget - run.lifetimeTokens()));
+  if (remaining.length) limits.maxTokens = Math.min(...remaining);
+  return limits;
+}
+
+/**
  * One full attempt of the phase on the agent's CURRENT engine: session
  * resolution, sends, gate loop, permission enforcement, envelope persistence
  * and usage stamping. One call per relay leg — each leg owns its own tree
@@ -691,7 +717,10 @@ async function attemptPhase(run, phase, call, agent, agentDir, systemText, userT
   let enforced = false;
 
   const doSend = async (promptText) => {
-    const result = await send(run, phase, agent, promptText, systemText, { sessionId });
+    const result = await send(run, phase, agent, promptText, systemText, {
+      sessionId,
+      limits: phaseLimits(run, spentTokens),
+    });
     // Account for the call BEFORE classifying its exit. Engines can return
     // real usage together with a non-zero code (limit, crash after generation,
     // invalid resumed session). Dropping that spend makes both the session
@@ -707,6 +736,30 @@ async function attemptPhase(run, phase, call, agent, agentDir, systemText, userT
     spentOutput += result.output_tokens || 0;
     spentCacheRead += result.cache_read_tokens || 0;
     spentCacheWrite += result.cache_write_tokens || 0;
+    // Token ceilings, AFTER accounting: a StopCondition (never an
+    // EngineFailure) so it can never arm the relay — re-running a
+    // budget-killed phase on another engine would re-spend everything.
+    run.checkTokenBudget({ phaseTokens: spentTokens });
+    if (result.terminated === 'timeout') {
+      const minutes = Math.round((run.stop.phase_timeout_minutes || 0));
+      if (spentTokens >= TIMEOUT_STOP_TOKENS) {
+        // Real work was underway — re-running it from zero (same engine or a
+        // fallback) is the failure mode these limits exist to prevent.
+        const stop = new StopCondition(
+          OUTCOMES.BUDGET_EXHAUSTED,
+          `${agent.name} ran past the ${minutes}-minute phase timeout after ${spentTokens} tokens — ` +
+            'stopping instead of re-spending the phase; raise stop.phase_timeout_minutes if the work is genuinely this long',
+        );
+        run.settle(stop.outcome, stop.message);
+        throw stop;
+      }
+      // Little spend = a hung CLI, not long work: classify as a crash so the
+      // normal path applies (one same-engine retry, then the relay chain).
+      throw new EngineFailure(
+        `${agent.name} (${agent.coding_agent}) produced almost nothing in ${minutes} minute(s) and was killed as hung`,
+        { kind: 'crash', coding_agent: agent.coding_agent, model: agent.model },
+      );
+    }
     if (result.returncode === 127) {
       throw new EngineFailure(`${agent.name} (${agent.coding_agent}): ${result.text}`, {
         kind: 'missing',

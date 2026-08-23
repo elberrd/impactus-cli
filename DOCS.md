@@ -1747,7 +1747,7 @@ can never be spelled two ways:
 | `verification_failed` | The work ran but the verification refused it — a red suite, or a reviewer that did not approve. |
 | `attempt_cap` | The fix loop spent its `stop.attempt_cap` repair rounds with the suite still red. |
 | `no_progress` | The SAME checks failing over a tree the repair did not change, round after round — stopped early on purpose. |
-| `budget_exhausted` | `stop.budget_minutes` was reached. |
+| `budget_exhausted` | A budget was reached: `stop.budget_minutes` (wall-clock), `stop.token_budget` (run lifetime), `stop.phase_token_budget` (one phase), or a phase timeout after real spend. |
 | `breadth_exceeded` | The run had already changed more files than `stop.breadth_ceiling`. |
 | `blocked_by_gate` | A gate or the permission allowlist refused (`GateFailure`, `PermissionBreach`). |
 | `engine_exhausted` | Every engine in the fallback chain died (`EngineFailure`). |
@@ -1774,16 +1774,24 @@ real failure. An outcome the caller knows precisely is passed in (`attempt_cap`,
 `no_progress`); otherwise it is derived (`goal_met` when accepted,
 `verification_failed` when not) or classified from the error.
 
-**Stop conditions** — four limits that cost zero tokens to evaluate, so a run
+**Stop conditions** — limits that cost zero tokens to evaluate, so a run
 that keeps re-trying the same failing thing stops instead of spending the
 student's plan. They live under `stop:` in `imp/fia.config.yaml`:
 
 | Key | Default | What it counts |
 |---|---|---|
-| `attempt_cap` | `3` | Repair rounds `fda_plan_build_test` and `fda_bug` may spend on a red suite (minimum 1 — a value below that is raised). |
+| `attempt_cap` | `3` | Repair rounds the tested FDAs (`fda_plan_build_test`, `fda_bug`, `fda_build_test` and the `/goal` default `fda_sdlc`) may spend on a red suite (minimum 1 — a value below that is raised). |
 | `no_progress_window` | `2` | Consecutive identical rounds after which the run is declared stuck. `0` turns the detector off. |
 | `budget_minutes` | `0` (**off**) | Wall-clock ceiling for one run. |
 | `breadth_ceiling` | `0` (**off**) | Maximum files one run may touch. Turning it on costs one tree fingerprint per phase, and a `Kind: foundation` run legitimately touches many. |
+| `token_budget` | `30000000` (**on**) | Token ceiling for the RUN LIFETIME — every resume of the same `fda_id` counts against it (the baseline is read from `sessions.total_tokens`, failing open). Warned once at 50% and 80% (`budget_warning` log events), stopped at 100% as `budget_exhausted`. Checked between phases AND between sends, and enforced mid-send by the adapters' token cut. `0` = off. |
+| `phase_token_budget` | `8000000` (**on**) | Token ceiling for ONE phase — all its sends, corrections and relay legs. The engine child is cut mid-send at the remaining room (SIGTERM, then SIGKILL). Never arms the relay: re-running a budget-killed phase on another engine would re-spend everything. `0` = off. |
+| `phase_timeout_minutes` | `50` (**on**) | Wall-clock ceiling for ONE agent send (`code` phases have their own timeouts). A kill with almost no spend (< 500k tokens) is a hung CLI and retries like a crash — same engine once, then the relay chain; a kill after real spend stops the run as `budget_exhausted` instead of re-paying the phase. `0` = off. |
+
+A budget-stopped run never switches engines or retries on its own: it pauses
+with a calm panel pointing at the `stop:` knob — raising the limit (or `0`)
+and resuming is a human decision. Cursor reports no token usage, so the token
+ceilings cannot see cursor phases (the timeout still applies).
 
 **Browser QA** (`/qa`) video retention lives under optional `qa:` in the same file:
 

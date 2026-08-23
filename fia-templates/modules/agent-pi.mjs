@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { armLimits } from './agent-limits.mjs';
 
 const PI_BIN = process.env.PI_PATH || 'pi';
 
@@ -58,6 +59,7 @@ export async function runPi(request, { onEvent, onSpawn, onExit } = {}) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     onSpawn?.(child.pid);
+    const limiter = armLimits(child, request.limits);
 
     let text = '';
     let tokens = 0;
@@ -98,6 +100,7 @@ export async function runPi(request, { onEvent, onSpawn, onExit } = {}) {
             cacheWrite += parts.cacheWrite;
             if (usage.contextSize) contextTokens = usage.contextSize;
             if (usage.contextWindow) contextWindow = usage.contextWindow;
+            limiter.noteTokens(tokens);
           }
           if (event.type === 'agent_end' && event.text) text = event.text;
         } catch {
@@ -134,6 +137,7 @@ export async function runPi(request, { onEvent, onSpawn, onExit } = {}) {
         cache_write_tokens: cacheWrite,
         context_tokens: contextTokens || tokens,
         context_window: contextWindow,
+        terminated: limiter.finish(),
       });
     });
 
@@ -149,6 +153,7 @@ export async function runPi(request, { onEvent, onSpawn, onExit } = {}) {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        terminated: limiter.finish(),
       });
     });
   });

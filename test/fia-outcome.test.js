@@ -152,8 +152,12 @@ test('stopPolicyOf: overrides win, 0 turns the optional limits off, attempt_cap 
     no_progress_window: 0,
     budget_minutes: 45,
     breadth_ceiling: 12,
+    token_budget: STOP_DEFAULTS.token_budget,
+    phase_token_budget: STOP_DEFAULTS.phase_token_budget,
+    phase_timeout_minutes: STOP_DEFAULTS.phase_timeout_minutes,
     warnings: [],
   });
+  assert.equal(stopPolicyOf({ stop: { token_budget: 0, phase_token_budget: 0, phase_timeout_minutes: 0 } }).token_budget, 0);
   assert.equal(stopPolicyOf({ stop: { attempt_cap: 0 } }).attempt_cap, 1);
   assert.equal(stopPolicyOf({ stop: { budget_minutes: '30' } }).budget_minutes, 30, 'a YAML string number is accepted');
   assert.equal(stopPolicyOf({ stop: { breadth_ceiling: 8.7 } }).breadth_ceiling, 8);

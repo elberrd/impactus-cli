@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { armLimits } from './agent-limits.mjs';
 
 const CLAUDE_BIN = process.env.CLAUDE_PATH || 'claude';
 const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'];
@@ -52,6 +53,7 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
       },
     );
     onSpawn?.(child.pid);
+    const limiter = armLimits(child, request.limits);
 
     let text = '';
     let tokens = 0;
@@ -98,6 +100,7 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
             cacheRead += usage.cacheRead;
             cacheWrite += usage.cacheWrite;
             lastContext = usage.input + usage.cacheRead + usage.cacheWrite;
+            limiter.noteTokens(tokens);
           }
         } catch {
           text += line;
@@ -122,6 +125,7 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
         cache_write_tokens: cacheWrite,
         context_tokens: lastContext,
         context_window: 0,
+        terminated: limiter.finish(),
       });
     });
 
@@ -137,6 +141,7 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        terminated: limiter.finish(),
       });
     });
   });

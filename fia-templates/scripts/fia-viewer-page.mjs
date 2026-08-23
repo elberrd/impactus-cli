@@ -381,7 +381,7 @@ function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(
 // in sync by hand. Every value here is a literal, so it is safe to interpolate.
 var OUTCOME_LABELS = { goal_met:'goal met', verification_failed:'verification failed',
   attempt_cap:'attempt cap reached', no_progress:'no progress',
-  budget_exhausted:'time budget exhausted', breadth_exceeded:'change breadth exceeded',
+  budget_exhausted:'budget exhausted (time or tokens)', breadth_exceeded:'change breadth exceeded',
   blocked_by_gate:'blocked by a gate', engine_exhausted:'engines exhausted',
   stopped_by_request:'stopped by request', aborted:'aborted', failed:'failed' };
 // The NAMED outcome as display text, already escaped, or '' when the trace
