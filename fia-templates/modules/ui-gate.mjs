@@ -170,6 +170,28 @@ function checkPrompt(files, rulePlan, contract) {
 }
 
 /**
+ * The re-audit after the repair round is scoped to the VIOLATIONS the first
+ * audit found — that audit already covered the full rubric and its other
+ * items passed; re-sending the whole rubric re-pays the reviewer for
+ * questions that were already answered (measured: the verify pass was the
+ * single largest UI-reviewer line on a real project).
+ */
+function verifyPrompt(files, problems) {
+  return [
+    'Re-audit ONLY the violations listed below. The first audit already covered the full UI rubric and every other item passed — do not re-judge them and do not raise new findings outside this list.',
+    'The UI contract (`ai-docs/ui/contract.json`) and the project catalogs still govern any violation that cites them.',
+    '',
+    'Files touched by the repair round:',
+    ...files.map((f) => `- ${f}`),
+    '',
+    'Violations to verify — emit ONE finding per item ({requirement, met, evidence}, evidence citing file/line):',
+    ...problems.map((p, i) => `${i + 1}. ${p}`),
+    '',
+    'Set approved=true ONLY when every violation above is fixed; otherwise list exactly what still fails in `blocking`.',
+  ].join('\n');
+}
+
+/**
  * Deterministic UI-conformance close-out, same shape as the checklist gate:
  * audit → one builder repair round when violations were found → re-audit,
  * failing the run if violations survive. The audit is an agent (a form that
@@ -286,10 +308,9 @@ export async function runUiGate(run, prompt) {
     async (ph) =>
       ph.call({
         outputType: 'ReviewOutput',
-        prompt: checkPrompt(
+        prompt: verifyPrompt(
           [...new Set([...scope.uiFiles, ...(fix.changed_files || []).filter((f) => FRONTEND_FILE.test(f))])],
-          scope.rulePlan,
-          scope.contract,
+          problems,
         ),
         previous: fix,
         gates: [verdictConsistent],

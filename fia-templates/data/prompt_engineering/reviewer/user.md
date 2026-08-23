@@ -16,7 +16,11 @@
 
 ## Task
 
-Review whether what was built satisfies `prompt`. Use git diff and the codebase.
+Review whether what was built satisfies `prompt`. Your scope is the DIFF:
+`git diff`, plus the files named in `previous_envelope` (`changed_files` /
+`artifacts`). Read other code only when a changed file forces you to — its
+direct callers, the contract it implements — and never crawl the repository
+looking for unrelated problems: an issue outside the diff is out of scope.
 
 If `prompt` is an implementation brief, also read its CURRENT file in
 `ai-docs/actual-todo/` and audit the checkboxes: a `[x]` the diff does not

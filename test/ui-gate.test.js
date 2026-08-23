@@ -395,3 +395,50 @@ test('FRONTEND_FILE: components and presentation styles arm the gate', () => {
     assert.ok(!FRONTEND_FILE.test(f), `${f} should NOT count as frontend`);
   }
 });
+
+// ── verify pass scoped to the violations ─────────────────────────────────────
+
+test('ui_verify re-audits ONLY the violations, never the whole rubric again', async () => {
+  const repo = uiFixture({ testExit: 0 });
+  const calls = {};
+  const run = fakeUiRun(repo, {
+    onCall: (name, call) => {
+      calls[name] = call;
+      if (name === 'ui_check')
+        return {
+          approved: false,
+          blocking: ['field errors render in a banner'],
+          findings: [{ requirement: 'toasts after mutations', met: false, evidence: 'app/Form.tsx:12 fires before resolve' }],
+        };
+      if (name === 'fix_ui') return { status: 'success', changed_files: ['app/Fixed.tsx'], artifacts: [] };
+      if (name === 'ui_verify') return { approved: true, findings: [] };
+      throw new Error(`unexpected agent phase ${name}`);
+    },
+  });
+  await runUiGate(run, UI_BRIEF);
+  // The first audit carries the full applicable rubric…
+  assert.match(calls.ui_check.prompt, /Applicable rubric/);
+  // …the verify pass carries only the delta: the violations and the touched files.
+  assert.match(calls.ui_verify.prompt, /Re-audit ONLY the violations/);
+  assert.match(calls.ui_verify.prompt, /field errors render in a banner/);
+  assert.match(calls.ui_verify.prompt, /toasts after mutations/);
+  assert.match(calls.ui_verify.prompt, /app\/Fixed\.tsx/);
+  assert.ok(!calls.ui_verify.prompt.includes('Applicable rubric'), 'the full rubric must not be re-sent');
+  assert.ok(
+    !calls.ui_verify.prompt.includes('Deterministic contract decisions'),
+    'the applicability table was already settled by the first audit',
+  );
+  assert.match(calls.ui_verify.prompt, /do not raise new findings outside this list/);
+});
+
+// ── reviewer prompts are diff-scoped and never re-audit the UI gate's work ───
+
+test('reviewer prompts: scope is the diff, and the general review does not re-audit patterns.md', () => {
+  const system = readFileSync(new URL('../fia-templates/data/prompt_engineering/reviewer/system.md', import.meta.url), 'utf8');
+  const user = readFileSync(new URL('../fia-templates/data/prompt_engineering/reviewer/user.md', import.meta.url), 'utf8');
+  assert.match(user, /Your scope is the DIFF/);
+  assert.match(user, /never crawl the repository/);
+  assert.ok(!user.includes('Use git diff and the codebase.'), 'the repo-wide instruction must be gone');
+  assert.match(system, /do NOT re-audit `ai-docs\/ui\/patterns\.md`/);
+  assert.match(system, /UI conformance is owned by the dedicated UI gate/);
+});

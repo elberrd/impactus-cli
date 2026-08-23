@@ -1466,7 +1466,9 @@ as disproportionate.
   components from the registry, the shared DataTable for record lists,
   semantic components for known-domain fields — with `ai-docs/ui/patterns.md`
   overriding the defaults when the project keeps one. Violations get ONE
-  `fix_ui` builder round, `ui_verify` re-audits, the final `ui_gate` (code)
+  `fix_ui` builder round; `ui_verify` then re-audits ONLY the violations the
+  first audit found (the full rubric was already answered — re-sending it
+  re-pays the reviewer for settled questions); the final `ui_gate` (code)
   throws if violations survive, and `ui_retest` re-runs the suite (the
   repair touched production code after the test phase). The rubric lives in
   `modules/` (not prompt material), so `--update-runtime` delivers it to
