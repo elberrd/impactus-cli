@@ -232,7 +232,14 @@ Rules for the loop:
   `node imp/fda_qa.mjs "<milestone-id>"` before selecting work from a later
   milestone. UI scope requires the validated contract plus Playwright/design
   evidence; API-only writes a reasoned skipped report. Any non-zero QA result
-  STOPS the loop. Never silently defer this boundary.
+  STOPS the loop. Never silently defer this boundary. QA green: drain the
+  milestone's documentation with ONE `fda_document` run (per-task runs skip
+  their `document` phase by default — `sdlc.document: per_milestone`), then
+  END the goal loop at this boundary when other milestones remain — hand off
+  in 5 lines and have the engineer run `/goal` again in a NEW session. All
+  state is durable in `ai-docs/`; a fresh session per milestone avoids the
+  accumulated orchestrator context that is the biggest hidden token cost of
+  a long goal.
 
 ## Step 4 — Deliver it RUNNING (definition of done)
 

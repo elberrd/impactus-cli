@@ -11,13 +11,21 @@ as /stack) — implementing with an undecided stack is guaranteed rework.
 
 Limit/instructions from the engineer: $@
 
+**Token discipline — your own context is a cost.** This session pays for every
+line it carries forward (a real project's goal session burned 240M tokens
+mostly re-reading its own history). Never paste briefs, reports or FDA output
+into the conversation — reference paths; the viewer (`npm run fda:viewer`) is
+the log. Report each task in ONE line. Never re-read `task-master.md` in full
+— the sequencer owns it. For routine milestones prefer `--light`
+(`fda_plan_build_test`); the full `fda_sdlc` is for bigger/riskier tasks.
+
 **FDA selection (evaluate after each brief is written):** an exact
 `Mode: prototype` line selects `fda_prototype.mjs` for that brief. Otherwise,
 if the engineer's instructions contain `--light`, use
 `fda_plan_build_test.mjs`; the default is `fda_sdlc.mjs`. Prototype takes
 precedence over `--light` because it is the brief's explicit per-task opt-in.
 
-Loop, until no unblocked task remains:
+Loop, until no unblocked task remains OR a milestone boundary closes (step 3):
 
 1. `task-sequencer` → next unblocked issue → brief in `ai-docs/actual-todo/`
    (sequencer stopped on the **theme gate** — right after the greenfield
@@ -57,7 +65,14 @@ Loop, until no unblocked task remains:
    node imp/fda_document.mjs "Document milestone <milestone-id>: what shipped across its tasks — read ai-docs/milestones.md and the completed briefs in ai-docs/todos/, write/update the docs, and commit them"
    ```
 
-   — and continue. QA exit != 0
+   — then, when other milestones remain, **END THIS LOOP at the milestone
+   boundary**: print a 5-line handoff (milestone done, QA report path, next
+   milestone id, "state is durable in ai-docs/ — run `/goal` again in a NEW
+   session to continue"). Every loop artifact lives on disk, so the fresh
+   session loses nothing and starts without this conversation's accumulated
+   weight — one milestone per session is the cheap shape. Only when NO
+   unblocked task remains anywhere do you continue to the final delivery
+   below. QA exit != 0
    → **STOP the goal**; show the phase, rule id/evidence, and artifact path.
    Never silently defer QA, continue into the next milestone, or mark a failed
    milestone complete. This automatic boundary supersedes the cookbook's
