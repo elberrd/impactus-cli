@@ -1185,6 +1185,11 @@ defaults:
   model: openai-codex/gpt-5.6-sol
   thinking: high                       # minimal|low|medium|high (Pi engines)
   relay: auto                          # engine death mid-run: auto|resume|off
+  session_rotation_context: 180000     # live-context ceiling per agent session
+                                       # (tokens); past it the next phase starts
+                                       # a fresh session with a compact reseed
+                                       # instead of resuming the giant one. 0 =
+                                       # never rotate.
   tools: [read, bash, edit, write, grep, find, ls]   # Pi tool allowlist
   protected_files:                     # deny-list enforced for EVERY agent
     - imp/modules/
@@ -1271,6 +1276,22 @@ resume; the death is still recorded and traced).
 Every switch is printed and traced — never silent. The config header repeats
 the golden billing rule: Claude INSIDE Pi bills per token as "extra usage" —
 always use `coding_agent: claude_code` to stay on the plan.
+
+**Session rotation**: one engine session per agent per run means `build →
+fix_1 → … → fix_ui` share one growing conversation — and a resumed session
+re-reads its whole prefix on EVERY turn (cache reads are ~10% of the input
+price, but on a long run they become ~94% of everything spent). Past
+`defaults.session_rotation_context` (default 180000 tokens of live context;
+`0` = never), the agent's NEXT phase starts a fresh session seeded with a
+compact reseed block on the user prompt: what the run already changed, the
+archived transcript path (Pi's session file is renamed
+`pi_session.<n>.rotated.jsonl`, never deleted) and the previous envelope that
+already rides the prompt template. The decision is taken only at phase start
+(corrections inside a phase always continue their session), it stands down
+when an engine-death marker targets the phase (the continuation preamble
+already reseeds), and each rotation is printed and traced as a
+`session_rotation` log event. Cursor reports no usage, so its sessions never
+rotate.
 
 **Permissions**: every agent phase snapshots the working tree (`git diff` +
 hashed untracked files); writes outside the agent's `writes` allowlist (or in

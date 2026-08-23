@@ -287,6 +287,65 @@ export function relayModeOf(cfg) {
 }
 
 /**
+ * Live-context ceiling (tokens) above which an agent's engine session is
+ * rotated instead of resumed. Measured on a real project: sessions grew to
+ * 7-9M tokens of context, and since every turn re-reads the whole prefix,
+ * 94% of ALL tokens spent were cache reads of that prefix. Resuming a session
+ * at the cap costs ~cap tokens of cache read PER TURN; a fresh session pays
+ * one small cache write and starts re-reading from ~20k — break-even is a
+ * handful of turns, and build phases run hundreds. Tolerant like `stop:`
+ * (modules/stop.mjs): absent/invalid → the default; 0 = never rotate.
+ */
+export const SESSION_ROTATION_DEFAULT = 180000;
+
+export function sessionRotationCapOf(cfg) {
+  const raw = cfg?.defaults?.session_rotation_context;
+  if (raw === undefined || raw === null) return SESSION_ROTATION_DEFAULT;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return SESSION_ROTATION_DEFAULT;
+  return Math.floor(value);
+}
+
+/** Changed-path lines kept inline in the rotation preamble; the rest is counted. */
+const ROTATION_PATHS_CAP = 50;
+
+/**
+ * The reseed block prepended to the USER prompt of a rotated session (never
+ * the system prompt — that must stay byte-stable for caching). Deliberately
+ * compact: the trimmed previous envelope already rides the user template as
+ * {{previous_envelope}}, so this block only adds what a fresh session cannot
+ * know — that it is mid-run, what the run already changed, and where the
+ * archived transcript lives.
+ */
+export function buildRotationPreamble({ contextTokens, cap, changedPaths = [], archivedTranscripts = [] }) {
+  const paths = changedPaths.slice(0, ROTATION_PATHS_CAP).map((p) => `- ${p}`);
+  if (changedPaths.length > ROTATION_PATHS_CAP) {
+    paths.push(`- (+${changedPaths.length - ROTATION_PATHS_CAP} more — run \`git status\` for the full list)`);
+  }
+  const transcripts = archivedTranscripts.map((p) => `- ${p}`);
+  return [
+    '## Session rotation (automatic)',
+    '',
+    `Your previous session for this run grew past the context cap (${contextTokens} tokens >= ${cap})`,
+    'and was archived. You are continuing the SAME run in a fresh session — do NOT start from scratch.',
+    '',
+    ...(paths.length ? ['Files this run has already changed:', ...paths, ''] : []),
+    ...(transcripts.length ? ['Archived transcript(s) — read-only historical reference:', ...transcripts, ''] : []),
+    'Rules:',
+    '1. The WORKSPACE is the authority on current state — read the actual files',
+    '   before trusting memory or any transcript claim.',
+    '2. Read an archived transcript selectively (scan the tail) and only when you',
+    '   are missing something; never re-read the whole file.',
+    "3. Your previous phase's Report envelope is included below — trust it for",
+    '   what was already delivered.',
+    '',
+    '---',
+    '',
+    '',
+  ].join('\n');
+}
+
+/**
  * Does this marker justify switching engines? login/limit/missing arm on the
  * first death (waiting cannot fix an expired login mid-run, and a limit will
  * outlive the run). A single crash may be transient noise — the same engine

@@ -48,6 +48,13 @@ news, not a defect:
 the optional `stop:` block of `imp/fia.config.yaml`; the code defaults apply when
 it is absent, so never tell the engineer they must add it.
 
+A `session_rotation` log line in a run is normal, not a defect: past
+`defaults.session_rotation_context` (default 180k tokens of live context) the
+agent's next phase continues the SAME run in a fresh engine session with a
+compact reseed — resuming a giant session re-reads its whole prefix on every
+turn, which is where runaway runs burn most tokens. The archived transcript
+stays on disk (`pi_session.<n>.rotated.jsonl` / `raw_output.jsonl`).
+
 ## Automatic recovery (once)
 
 A first recoverable failure is retried in CODE, not by asking the engineer:
