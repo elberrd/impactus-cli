@@ -133,7 +133,8 @@ observability:
 # The values below are the CODE defaults — this whole block is optional and a
 # missing/typo'd/negative key degrades to the default with a printed warning.
 # stop:
-#   attempt_cap: 3          # fix rounds /task and /bug may spend on a red suite
+#   attempt_cap: 3          # fix rounds the tested FDAs (/task, /bug and the
+#                             /goal default fda_sdlc) may spend on a red suite
 #                             (/quick has a fixed cap of one round, by design)
 #   no_progress_window: 2   # stop when the SAME failing checks AND the same changed
 #                             files repeat this many rounds — the run is stuck and
@@ -142,6 +143,20 @@ observability:
 #   breadth_ceiling: 0      # max files one run may touch. 0 = off (the default);
 #                             turning it on costs one tree fingerprint per phase,
 #                             and a `Kind: foundation` run legitimately touches many.
+
+# sdlc — optional agent phases of the /goal default runner (fda_sdlc). Defaults
+# live in code (imp/modules/sdlc-policy.mjs); an absent block behaves exactly
+# like them. Both knobs exist to stop paying agent calls that add nothing:
+# a sequencer brief already IS the plan, and per-task docs read better written
+# once per milestone.
+# sdlc:
+#   plan: auto              # auto (default) | always | never — `auto` skips the
+#                             planner when the brief is self-contained (markdown
+#                             sections + acceptance checklist); foundation/kit
+#                             briefs and a `Planning: full` line still get one.
+#   document: per_milestone # per_milestone (default) | per_task — per_milestone
+#                             defers docs to the milestone boundary, where /goal
+#                             dispatches one fda_document for the whole milestone.
 
 # qa — browser QA runs (/qa). Unit tests stay in the per-task FDA; this block
 # only controls Playwright artifact retention.

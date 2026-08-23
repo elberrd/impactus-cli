@@ -1,7 +1,5 @@
 #!/usr/bin/env node
 /** FDA Build Test — build → test → commit (no planner, brief goes directly to builder). */
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { runFda, phaseParams } from './modules/fda-cli.mjs';
 import { artifactsExist, parseSpecLine, checkSpecCoverage, checkSpecDiagram, isFoundationBrief } from './modules/gates.mjs';
 import { resolveBriefPath, runChecklistGate } from './modules/checklist.mjs';
@@ -12,33 +10,8 @@ import { runHoldoutGate } from './modules/holdout.mjs';
 import { runSpecDeliveryClose } from './modules/spec-lifecycle.mjs';
 import { OUTCOMES } from './modules/outcome.mjs';
 import { changedContentSignature, createRepairTracker } from './modules/stop.mjs';
+import { builderDeclaredFiles } from './modules/utils.mjs';
 import * as git from './modules/git-helper.mjs';
-
-/**
- * Files declared by EVERY persisted builder envelope (build + fix_N). On resume
- * the in-memory `previous` can be just the replayed build envelope (test_1
- * re-runs and passes because the fix is already on disk, so the fix loop never
- * executes) — files touched by earlier fix rounds live only in phase_results.
- */
-function builderDeclaredFiles(run) {
-  const files = [];
-  let names = [];
-  try {
-    names = readdirSync(run.phaseResultsDir);
-  } catch {
-    /* no phase results dir — nothing persisted */
-  }
-  for (const name of names) {
-    if (!/^(build|fix_\d+|fix_checklist|fix_ui)\.json$/.test(name)) continue;
-    try {
-      const saved = JSON.parse(readFileSync(join(run.phaseResultsDir, name), 'utf8'));
-      files.push(...(saved.result?.changed_files || []), ...(saved.result?.artifacts || []));
-    } catch {
-      /* unreadable phase result — the in-memory envelopes still cover the rest */
-    }
-  }
-  return files;
-}
 
 await runFda(
   async ({ run, prompt, args }) => {

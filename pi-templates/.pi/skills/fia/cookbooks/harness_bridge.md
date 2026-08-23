@@ -116,7 +116,9 @@ After the artifacts land, show them to the engineer: `npm run plan -- --detach` 
 node imp/fda_plan_build_test.mjs ai-docs/actual-todo/<brief>.md
 # brief already autocontained (skip planner, save ~1-2.5M tokens):
 node imp/fda_build_test.mjs ai-docs/actual-todo/<brief>.md
-# bigger/riskier: plan → build → test → review → document + commits
+# bigger/riskier: plan (auto-skipped on self-contained briefs) → build →
+# test + fix rounds → review (green suites only) → commit. Docs default to one
+# fda_document per MILESTONE (`sdlc:` block in imp/fia.config.yaml).
 node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md
 # fast prototype (build + lint only, no tests/review; brief MUST carry Mode: prototype):
 node imp/fda_prototype.mjs ai-docs/actual-todo/<brief>.md

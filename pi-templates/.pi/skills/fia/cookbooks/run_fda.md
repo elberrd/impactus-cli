@@ -7,7 +7,7 @@ node imp/fda_scout.mjs "map auth flow"
 node imp/fda_plan.mjs "add /health endpoint"
 node imp/fda_plan_build_test.mjs "implement the plan" --fda-id <id from plan run>
 node imp/fda_build_test.mjs "brief is already autocontained — skip planner"
-node imp/fda_sdlc.mjs "full feature from ai-docs issue"
+node imp/fda_sdlc.mjs "full feature from ai-docs issue"   # planner auto-skips on self-contained briefs; review only on green suites; docs drain per milestone (sdlc: block)
 node imp/fda_prototype.mjs ai-docs/actual-todo/<brief-with-Mode-prototype>.md
 ```
 

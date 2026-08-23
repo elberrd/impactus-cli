@@ -1,32 +1,14 @@
 #!/usr/bin/env node
 /** FDA Prototype — build → lint/typecheck → commit (no plan, no tests, no review). */
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { runFda, phaseParams } from './modules/fda-cli.mjs';
 import { artifactsExist, isFoundationBrief, isPrototypeBrief } from './modules/gates.mjs';
 import { defaultSpecs, runQuality, asEnvelope } from './modules/quality.mjs';
 import { OUTCOMES } from './modules/outcome.mjs';
+import { builderDeclaredFiles } from './modules/utils.mjs';
 import * as git from './modules/git-helper.mjs';
 
-function builderDeclaredFiles(run) {
-  const files = [];
-  let names = [];
-  try {
-    names = readdirSync(run.phaseResultsDir);
-  } catch {
-    /* no phase results dir */
-  }
-  for (const name of names) {
-    if (!/^(build|fix)\.json$/.test(name)) continue;
-    try {
-      const saved = JSON.parse(readFileSync(join(run.phaseResultsDir, name), 'utf8'));
-      files.push(...(saved.result?.changed_files || []), ...(saved.result?.artifacts || []));
-    } catch {
-      /* unreadable phase result */
-    }
-  }
-  return files;
-}
+/** This runner has a single fix round, persisted as `fix.json`. */
+const PROTOTYPE_RESULT_FILES = /^(build|fix)\.json$/;
 
 function protoSpecs(projectRoot) {
   return defaultSpecs(projectRoot).filter((s) => s.name === 'lint' || s.name === 'typecheck');
@@ -90,7 +72,7 @@ await runFda(
             ...new Set([
               ...(build.changed_files || []),
               ...(build.artifacts || []),
-              ...builderDeclaredFiles(run),
+              ...builderDeclaredFiles(run, PROTOTYPE_RESULT_FILES),
               ...(isFoundationBrief(prompt) ? git.runChangedPaths(run.repoRoot, run.baseline) : []),
             ]),
           ];
