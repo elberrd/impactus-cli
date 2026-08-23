@@ -9,6 +9,7 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { armLimits } from './agent-limits.mjs';
 
 const CURSOR_BIN = process.env.CURSOR_AGENT_PATH || 'cursor-agent';
 const FALLBACK_BIN = 'agent';
@@ -48,6 +49,8 @@ function spawnOnce(bin, request, { onEvent, onSpawn, onExit }) {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     onSpawn?.(child.pid);
+    // No token usage in Cursor's stream — only the wall-clock timeout applies.
+    const limiter = armLimits(child, request.limits);
 
     let text = '';
     let assistantText = '';
@@ -98,6 +101,7 @@ function spawnOnce(bin, request, { onEvent, onSpawn, onExit }) {
         cache_write_tokens: 0,
         context_tokens: 0,
         context_window: 0,
+        terminated: limiter.finish(),
       });
     });
 
@@ -117,6 +121,7 @@ function spawnOnce(bin, request, { onEvent, onSpawn, onExit }) {
         output_tokens: 0,
         cache_read_tokens: 0,
         cache_write_tokens: 0,
+        terminated: limiter.finish(),
       });
     });
   });

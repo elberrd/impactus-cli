@@ -20,10 +20,27 @@ export const STOP_DEFAULTS = Object.freeze({
   no_progress_window: 2,
   budget_minutes: 0,
   breadth_ceiling: 0,
+  // Token ceilings ship ON with generous room: a healthy run today spends
+  // well under these, and the catastrophic runs they exist to stop (a real
+  // project recorded a 112M-token run and a single 36M-token phase) sail past
+  // them. Tokens count the RUN LIFETIME — every resume of the same fda_id.
+  token_budget: 30000000,
+  phase_token_budget: 8000000,
+  // Wall-clock ceiling for ONE agent send (code phases have their own
+  // timeouts in quality.mjs). A hung CLI is killed and handled like a crash;
+  // a long genuine phase is stopped cleanly as budget_exhausted.
+  phase_timeout_minutes: 50,
 });
 
 /** Numeric keys where 0 is a legal value meaning "this limit is OFF". */
-const ZERO_MEANS_OFF = new Set(['no_progress_window', 'budget_minutes', 'breadth_ceiling']);
+const ZERO_MEANS_OFF = new Set([
+  'no_progress_window',
+  'budget_minutes',
+  'breadth_ceiling',
+  'token_budget',
+  'phase_token_budget',
+  'phase_timeout_minutes',
+]);
 
 /** What each key counts, so a warning can name the unit in plain English. */
 const UNITS = Object.freeze({
@@ -31,6 +48,9 @@ const UNITS = Object.freeze({
   no_progress_window: 'identical rounds (0 turns the check off)',
   budget_minutes: 'minutes (0 turns the budget off)',
   breadth_ceiling: 'changed files (0 turns the ceiling off)',
+  token_budget: 'tokens for the whole run, resumes included (0 turns the budget off)',
+  phase_token_budget: 'tokens for one phase (0 turns the budget off)',
+  phase_timeout_minutes: 'minutes for one agent send (0 turns the timeout off)',
 });
 
 /**

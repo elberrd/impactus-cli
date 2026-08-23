@@ -47,7 +47,7 @@ const LABELS = Object.freeze({
   [OUTCOMES.VERIFICATION_FAILED]: 'verification failed',
   [OUTCOMES.ATTEMPT_CAP]: 'attempt cap reached',
   [OUTCOMES.NO_PROGRESS]: 'no progress',
-  [OUTCOMES.BUDGET_EXHAUSTED]: 'time budget exhausted',
+  [OUTCOMES.BUDGET_EXHAUSTED]: 'budget exhausted (time or tokens)',
   [OUTCOMES.BREADTH_EXCEEDED]: 'change breadth exceeded',
   [OUTCOMES.BLOCKED_BY_GATE]: 'blocked by a gate',
   [OUTCOMES.ENGINE_EXHAUSTED]: 'engines exhausted',

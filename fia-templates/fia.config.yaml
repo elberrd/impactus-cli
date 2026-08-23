@@ -148,6 +148,19 @@ observability:
 #                             files repeat this many rounds — the run is stuck and
 #                             more rounds only spend your plan. 0 = off.
 #   budget_minutes: 0       # wall-clock ceiling for one run. 0 = off (the default).
+#   token_budget: 30000000  # token ceiling for the RUN LIFETIME (every resume of
+#                             the same run counts). Warned at 50% and 80%, stopped
+#                             at 100% with outcome budget_exhausted. 0 = off.
+#   phase_token_budget: 8000000
+#                           # token ceiling for ONE phase (all its sends and relay
+#                             legs) — the engine is cut mid-send at the limit, so a
+#                             single runaway phase cannot spend the whole plan.
+#                             0 = off.
+#   phase_timeout_minutes: 50
+#                           # wall-clock ceiling for ONE agent send. A hung CLI
+#                             with almost no output is killed and retried like a
+#                             crash; a timeout after real spend stops the run
+#                             cleanly instead of re-paying the phase. 0 = off.
 #   breadth_ceiling: 0      # max files one run may touch. 0 = off (the default);
 #                             turning it on costs one tree fingerprint per phase,
 #                             and a `Kind: foundation` run legitimately touches many.
