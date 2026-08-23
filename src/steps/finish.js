@@ -221,6 +221,8 @@ export async function finish(ctx) {
         ? 'but Pi also accepts other providers/models — type /login inside Pi to see them.'
         : 'but you can also work through Cursor or add engines later at any time.',
       'Re-check this roster (and the whole setup) anytime with `imp doctor`.',
+      'Every model is YOUR choice, on YOUR plan: `imp llm` swaps any agent in',
+      'seconds, and `npm run fda:cost-report` shows what each one actually spends.',
     ]
       .filter(Boolean)
       .join('\n'),

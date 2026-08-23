@@ -67,3 +67,43 @@ test('validate: thinking/effort overrides pass', () => {
     validate({ agents: [builder({ 'fix_*': { thinking: 'low' }, review: { effort: 'medium' } })] }, ['builder']),
   );
 });
+
+// ── the SHIPPED roster carries the recipes (they used to be docs-only) ───────
+
+test('the shipped fia.config.yaml pre-seeds low-reasoning overrides on repair and UI-verify phases', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { parse } = await import('yaml');
+  const template = parse(readFileSync(new URL('../fia-templates/fia.config.yaml', import.meta.url), 'utf8'));
+  const byName = Object.fromEntries(template.agents.map((a) => [a.name, a]));
+
+  assert.deepEqual(byName.builder.phase_overrides['fix_*'], { thinking: 'low', effort: 'low' });
+  assert.deepEqual(byName.builder.phase_overrides.fix, { thinking: 'low', effort: 'low' });
+  assert.deepEqual(byName.reviewer.phase_overrides.ui_check, { effort: 'low', thinking: 'low' });
+  assert.deepEqual(byName.reviewer.phase_overrides.ui_verify, { effort: 'low', thinking: 'low' });
+  assert.equal(byName.documenter.thinking, 'low', 'the documenter narrates an existing diff');
+  // Models stay exactly the engineer-facing defaults — overrides tune
+  // reasoning only, never the model (that choice belongs to the user).
+  for (const agent of template.agents) {
+    for (const override of Object.values(agent.phase_overrides || {})) {
+      assert.deepEqual(
+        Object.keys(override).filter((k) => k !== 'thinking' && k !== 'effort'),
+        [],
+        `${agent.name}: an override may tune reasoning only`,
+      );
+    }
+  }
+
+  // The shipped shapes pass the real validator (prompt paths rewritten to the
+  // repo copies — the template's imp/ paths only exist in a stamped project).
+  const cfg = {
+    ...template,
+    agents: template.agents.map((a) => ({ ...a, prompt_engineering: { system: SYSTEM, user: USER } })),
+  };
+  assert.doesNotThrow(() => validate(cfg, ['builder', 'reviewer', 'documenter']));
+
+  // And resolveForPhase applies them where the runners will ask.
+  assert.equal(resolveForPhase(cfg, 'builder', 'fix_2').thinking, 'low');
+  assert.equal(resolveForPhase(cfg, 'builder', 'build').thinking, 'medium', 'build keeps the base reasoning');
+  assert.equal(resolveForPhase(cfg, 'reviewer', 'ui_verify').effort, 'low');
+  assert.equal(resolveForPhase(cfg, 'reviewer', 'review').effort, 'high', 'the functional review keeps full effort');
+});
