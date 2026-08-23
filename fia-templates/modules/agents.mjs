@@ -1,4 +1,4 @@
-import { readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import * as agentPi from './agent-pi.mjs';
@@ -8,6 +8,7 @@ import * as prompts from './prompts.mjs';
 import * as permissions from './permissions.mjs';
 import * as continuation from './continuation.mjs';
 import { checkEngines, engineIssue } from './engines.mjs';
+import { runChangedPaths } from './git-helper.mjs';
 import { makeStreamRecorder } from './stream-events.mjs';
 import { extractJson, getOutputSchema } from './envelopes.mjs';
 import { gateReport } from './gates.mjs';
@@ -402,8 +403,87 @@ function composeUserText(run, phase, agent, agentDir, variables, extras = {}) {
         }) + userText;
     }
   }
+  // The rotation reseed rides the USER prompt for the same caching reason.
+  // Mutually exclusive with the marker continuation by construction: a marker
+  // targeting this phase stands the rotation down (planSessionRotation).
+  if (extras.rotation) {
+    composed =
+      continuation.buildRotationPreamble({
+        contextTokens: extras.rotation.contextTokens,
+        cap: extras.rotation.cap,
+        changedPaths: safeChangedPaths(run),
+        archivedTranscripts: extras.rotation.archivedTranscripts,
+      }) + composed;
+  }
   if (extras.permissionRetry) composed = permissionRetryPreamble(extras.permissionRetry) + composed;
   return composed;
+}
+
+/** The run's changed paths, or [] when git is unavailable — never throws. */
+function safeChangedPaths(run) {
+  try {
+    return runChangedPaths(run.repoRoot, run.baseline);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Should this phase START A FRESH SESSION instead of resuming the agent's
+ * accumulated one? Rotation fires when the session's live context passed the
+ * cap (`defaults.session_rotation_context`): every turn of a resumed session
+ * re-reads the whole prefix, so past the cap a fresh session with a compact
+ * reseed is cheaper within a handful of turns. Skipped when an engine-death
+ * marker targets this phase — the continuation preamble already reseeds, and
+ * a Pi native resume needs the session file in place. Archives the Pi session
+ * file aside (never deleted: it stays as a read-only reference) and clears
+ * the agent-map entry so resumeSessionId naturally mints a new session.
+ */
+function planSessionRotation(run, phase, agent, agentDir) {
+  const cap = continuation.sessionRotationCapOf(run.cfg);
+  if (!(cap > 0)) return null;
+  const entry = run.agentMap[agent.name];
+  // No session, or a model change: the next send is fresh anyway.
+  if (!entry || !entry.session_id || entry.model !== agent.model) return null;
+  const contextTokens = Number(entry.context_tokens) || 0;
+  if (contextTokens < cap) return null;
+  const marker = continuation.readEngineError(agentDir);
+  if (marker && marker.phase === phase.params.name) return null;
+
+  const archivedTranscripts = [join(agentDir, 'raw_output.jsonl')];
+  if (agent.coding_agent === 'pi') {
+    const sessionFile = join(agentDir, 'pi_session.jsonl');
+    if (existsSync(sessionFile)) {
+      let n = 1;
+      while (existsSync(join(agentDir, `pi_session.${n}.rotated.jsonl`))) n += 1;
+      const archived = join(agentDir, `pi_session.${n}.rotated.jsonl`);
+      try {
+        renameSync(sessionFile, archived);
+        archivedTranscripts.push(archived);
+      } catch {
+        // The rename failing means the old session would still be resumed —
+        // rotating only the claude/cursor way (no --resume) is wrong for Pi,
+        // so stand down and try again next phase.
+        return null;
+      }
+    }
+  }
+  run.saveAgentMap(agent.name, { ...entry, session_id: '', context_tokens: 0 });
+  run.console.note(
+    `${agent.name}: session rotated at ${contextTokens} context tokens (cap ${cap}) — fresh session with a compact reseed`,
+  );
+  try {
+    run.tracer.event({
+      fda_id: run.fdaId,
+      phase_id: phase.phase_id,
+      type: 'log',
+      name: 'session_rotation',
+      payload: { agent: agent.name, context_tokens: contextTokens, cap },
+    });
+  } catch {
+    /* tracing must never block the rotation */
+  }
+  return { contextTokens, cap, archivedTranscripts };
 }
 
 /** Persist the death (marker + engine_error event) — never masks the error. */
@@ -488,6 +568,9 @@ export async function execute(run, phase, call) {
   // fallbacks only on --resume; 'off' never auto-switches.
   const relayMode = continuation.relayModeOf(run.cfg);
   const tried = new Set([engineKey(agent)]);
+  // Decided ONCE per phase, before the first send: a rotated session stays
+  // rotated for every relay leg (relay legs start fresh sessions anyway).
+  const rotation = planSessionRotation(run, phase, agent, agentDir);
   // One automatic retry after a fully-rolled-back allowlist breach. The
   // rollback IS the fix; the second attempt is told which paths to leave
   // alone. A second breach (or an unrecoverable one) surfaces to the engineer.
@@ -496,7 +579,7 @@ export async function execute(run, phase, call) {
   for (;;) {
     // Composed and saved BEFORE the send so the audit copy under prompts/
     // shows what was actually sent — continuation preamble included.
-    const userText = composeUserText(run, phase, agent, agentDir, variables, { permissionRetry });
+    const userText = composeUserText(run, phase, agent, agentDir, variables, { permissionRetry, rotation });
     prompts.savePromptDir(join(agentDir, 'prompts'), 'user.md', userText);
     try {
       const envelope = await attemptPhase(run, phase, call, agent, agentDir, systemText, userText);
@@ -697,6 +780,9 @@ async function attemptPhase(run, phase, call, agent, agentDir, systemText, userT
       session_id: sessionId || result.session_id || '',
       model: agent.model,
       coding_agent: agent.coding_agent,
+      // Live context of the session after this phase — the rotation cap
+      // compares against this on the NEXT phase (planSessionRotation).
+      context_tokens: result.context_tokens || 0,
     });
     run.tracer.agentSessionRow(
       run.fdaId,

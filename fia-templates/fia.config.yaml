@@ -87,6 +87,14 @@ defaults:
   #                      and on --resume; resume = fail fast now, arm the chain
   #                      only on --resume; off = never auto-switch (the death
   #                      is still recorded and traced).
+  # session_rotation_context: 180000
+  #                    # live-context ceiling (tokens) per agent session. Past
+  #                      it, the next phase starts a FRESH session seeded with
+  #                      a compact recap instead of resuming the giant one —
+  #                      a resumed session re-reads its whole prefix on EVERY
+  #                      turn, which is where runaway runs burn most tokens.
+  #                      0 = never rotate. Default lives in code
+  #                      (imp/modules/continuation.mjs).
   harness_engineering: []
   tools:
     - read

@@ -59,6 +59,11 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
     let output = 0;
     let cacheRead = 0;
     let cacheWrite = 0;
+    // Live context ≈ what the LAST turn processed (fresh input + the cached
+    // prefix it re-read) — NOT the invocation-accumulated sum, which grows
+    // with every turn and would make the session-rotation cap fire on any
+    // long phase regardless of actual context size.
+    let lastContext = 0;
     // Subscription billing: no dollar cost unless the CLI reports one (result event).
     let cost = 0;
     let sessionId = request.sessionId || '';
@@ -92,6 +97,7 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
             output += usage.output;
             cacheRead += usage.cacheRead;
             cacheWrite += usage.cacheWrite;
+            lastContext = usage.input + usage.cacheRead + usage.cacheWrite;
           }
         } catch {
           text += line;
@@ -114,7 +120,7 @@ export async function runClaude(request, { onEvent, onSpawn, onExit } = {}) {
         output_tokens: output,
         cache_read_tokens: cacheRead,
         cache_write_tokens: cacheWrite,
-        context_tokens: tokens,
+        context_tokens: lastContext,
         context_window: 0,
       });
     });
