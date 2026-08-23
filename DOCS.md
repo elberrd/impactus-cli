@@ -1253,6 +1253,14 @@ are accepted inside an override; engine, model, prompts, permissions and
 fallbacks remain the validated base configuration. Any other field fails
 config validation instead of silently changing how or where a phase runs.
 
+The shipped roster pre-seeds the recipes above (they used to be
+documentation-only): builder `fix_*`/`fix` at low reasoning (repair rounds act
+on concrete failure output), reviewer `ui_check`/`ui_verify` at low (a fixed
+rubric is a checklist judgement — the functional `review` keeps full effort),
+and the documenter's base `thinking` is `low` (it narrates an existing diff).
+Models are never touched by these — which model each agent runs on is always
+the engineer's choice (`imp llm` / the Agents tab), on their own plan.
+
 Engines (`coding_agent`):
 
 | Engine | Binary | Model examples | Notes |

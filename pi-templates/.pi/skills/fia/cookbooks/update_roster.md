@@ -38,6 +38,16 @@ Pi API-key providers (any of them, per agent): `openrouter/…` (OPENROUTER_API_
 
 Rule of thumb: heavy reasoning (planner, reviewer) on a frontier model; volume work (builder, scout, documenter) on a fast/cheap one — different providers in the SAME run is the point.
 
+Cost reality check (measured on a real project ledger): the planner on a
+top-tier model averaged **US$3.55 per call** and 15% of ALL tokens; the same
+role on the mid-tier model of the same plan costs roughly a fifth for briefs
+that are already self-contained. The model is ALWAYS the engineer's choice —
+their plan, their subscription — so never switch it silently: show the ledger
+(`npm run fda:cost-report`, or the Agents tab) and offer the one-liner
+(`/llm set planner <model>` swaps it in seconds). The shipped roster already
+carries `phase_overrides` that drop reasoning (never the model) on repair and
+UI-verify phases — keep them when editing an agent by hand.
+
 WARNING: Claude INSIDE Pi bills as per-token "extra usage" — to spend plan limits, always use `coding_agent: claude_code`.
 
 ## Fallbacks — per-agent `fallbacks:` chain

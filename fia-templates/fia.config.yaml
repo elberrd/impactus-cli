@@ -230,6 +230,12 @@ agents:
     thinking: medium
     color: "#22d3ee"
     purpose: Implement the plan exactly; report every changed file in the envelope.
+    # Repair rounds get concrete failure output to act on — deep reasoning adds
+    # cost, not quality, there. Only thinking/effort may vary by phase; the
+    # model never does (that would break the session and the cache).
+    phase_overrides:
+      "fix_*": { thinking: low, effort: low }
+      fix: { thinking: low, effort: low }
     fallbacks:
       - { coding_agent: claude_code, model: sonnet, effort: high }
     prompt_engineering:
@@ -271,6 +277,12 @@ agents:
     thinking: high
     color: "#fb7185"
     purpose: Confirm that what was built matches what was asked; change nothing.
+    # The UI-conformance passes audit a fixed rubric against named files — a
+    # checklist judgement, not deep reasoning; the functional review keeps the
+    # full effort. Both fields set so the override survives an engine relay.
+    phase_overrides:
+      ui_check: { effort: low, thinking: low }
+      ui_verify: { effort: low, thinking: low }
     fallbacks:
       - { coding_agent: pi, model: openai-codex/gpt-5.6-sol, thinking: high }
     prompt_engineering:
@@ -288,7 +300,9 @@ agents:
   - name: documenter
     coding_agent: pi
     model: openai-codex/gpt-5.6-sol
-    thinking: medium
+    # Documentation narrates a diff that already exists — low reasoning reads
+    # the same and costs a fraction.
+    thinking: low
     color: "#e879f9"
     purpose: Write up the change from the diff; documentation only.
     fallbacks:
