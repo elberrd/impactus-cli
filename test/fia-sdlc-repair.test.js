@@ -142,3 +142,14 @@ test('the shipped config template documents the sdlc block and /goal drains mile
   assert.match(goal, /node imp\/fda_document\.mjs "Document milestone/);
   assert.match(goal, /sdlc\.document: per_milestone/);
 });
+
+test('the goal loop is milestone-scoped and token-disciplined', () => {
+  const goal = readFileSync(new URL('../pi-templates/.pi/prompts/goal.md', import.meta.url), 'utf8');
+  assert.match(goal, /Token discipline/);
+  assert.match(goal, /Never paste briefs, reports or FDA output/);
+  assert.match(goal, /END THIS LOOP at the milestone\s+boundary/);
+  assert.match(goal, /run `\/goal` again in a NEW\s+session/);
+  const bridge = readFileSync(new URL('../pi-templates/.pi/skills/fia/cookbooks/harness_bridge.md', import.meta.url), 'utf8');
+  assert.match(bridge, /END the goal loop at this boundary/);
+  assert.match(bridge, /fresh session per milestone/);
+});
