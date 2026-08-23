@@ -123,6 +123,15 @@ Only the failed phase and everything after it execute again. This is the
 default for any re-run; a fresh run (no `--resume`) is only for when the
 engineer explicitly wants to redo the whole flow.
 
+A bare resume is guarded in code: over a tree IDENTICAL to the one that
+failed it is refused (re-running cannot end differently — fix the code, or
+record a verdict first), and every bare resume spends the run's combined
+recovery budget (`verdicts + bare resumes >= 8` refuses with the instruction
+to convert the remaining gaps into a follow-up task). Treat a refusal as
+STOP-and-ask; `--retry-unchanged` is the engineer's override for genuinely
+flaky failures, never yours. The `/qa` audit and `ui_verify` carry the same
+guard individually — a tree they already rejected is not re-judged.
+
 When the ENGINE itself died (expired login, plan limit, crash, provider
 outage), the resume also continues on that agent's `fallbacks:` chain instead
 of retrying the engine that already proved it cannot finish — and the

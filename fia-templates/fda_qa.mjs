@@ -26,6 +26,7 @@ import {
   runPlaywrightE2e,
   unchangedRetryError,
 } from './modules/qa-playwright.mjs';
+import { clearAttempt, readAttempt, recordAttemptFailure, unchangedSinceFailure } from './modules/tree-guard.mjs';
 import { loadUiContract } from './scripts/ui-contract.mjs';
 import { verifyUiKitReceipt } from './modules/ui-kit-receipt.mjs';
 
@@ -161,7 +162,7 @@ await runFda(
           stamp,
           fdaId: run.fdaId,
           artifactRelDir,
-          override: cli.retryUnchanged,
+          override: cli.retryUnchanged || run.retryUnchanged,
         });
         if (futile) throw new Error(futile);
         const result = await runPlaywrightE2e(run, {
@@ -197,8 +198,23 @@ await runFda(
           'Audit screenshots and Playwright output against registry, patterns, and responsiveness',
           { retries: 1, replay: false },
         ),
-        async (ph) =>
-          ph.call({
+        async (ph) => {
+          // Unchanged-retry guard, same rule as the e2e phase above: this
+          // phase re-executes on every resume (replay: false) and costs a full
+          // reviewer pass — a rejected audit over the EXACT same tree can only
+          // be rejected again, so refuse before spending anything.
+          const artifactAbsDir = join(run.repoRoot, artifactRelDir);
+          const auditStamp = repoStamp(run.repoRoot);
+          const prior = readAttempt(artifactAbsDir, 'audit');
+          if (unchangedSinceFailure({ prior, stamp: auditStamp, override: cli.retryUnchanged || run.retryUnchanged })) {
+            throw new Error(
+              `the design audit already rejected this exact tree ${prior.count === 1 ? 'once' : `${prior.count} times`} — nothing changed in the repo since, so re-auditing cannot approve.\n` +
+                `Fix the violations first (report: ai-docs/qa/), then resume:\n` +
+                `  node imp/fda_qa.mjs --resume --fda-id ${run.fdaId}\n` +
+                'Deliberate re-audit of the same tree? Re-run with --retry-unchanged.',
+            );
+          }
+          const verdict = await ph.call({
             outputType: 'ReviewOutput',
             prompt: auditPrompt(resolved.scope, {
               artifactDir: artifactRelDir,
@@ -207,7 +223,11 @@ await runFda(
               contract: resolved.contract,
             }),
             gates: [verdictConsistent],
-          }),
+          });
+          if (verdict.approved) clearAttempt(artifactAbsDir, 'audit');
+          else recordAttemptFailure(artifactAbsDir, 'audit', auditStamp);
+          return verdict;
+        },
       );
     } else {
       await run.runPhase(

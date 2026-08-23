@@ -274,6 +274,10 @@ export function main(argv) {
     );
     console.error('This ceiling is enforced in code so a recovery loop can never run away on its own.');
     console.error('A human decides now: fix it by hand, skip the task, or split it into smaller tasks.');
+    console.error(
+      'The cheapest healthy path: convert the remaining gaps into a FOLLOW-UP task brief (task-sequencer) — ' +
+        'a fresh run starts with small sessions and clean context, instead of re-resuming this one at full width.',
+    );
     console.error(`To deliberately grant more recoveries, delete: ${join(sessionDir, VERDICT_HISTORY_FILE)}`);
     return 1;
   }

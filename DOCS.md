@@ -1895,6 +1895,22 @@ node imp/fda_sdlc.mjs --fda-id <fda_id> --resume
   and the refusal here is the STOP it cannot talk its way past. Granting more
   recoveries is a deliberate human act (delete the ledger file by hand), not a
   flag an agent can pass.
+- A **bare `--resume`** (no verdict) spends the same budget: every one is
+  recorded in `resume_history.json`, and `verdicts + bare resumes >= 8`
+  (`RECOVERY_CAP`) refuses further resumes with the instruction to convert the
+  remaining gaps into a follow-up task instead — before this ledger existed, a
+  bare resume consumed no budget at all, which is how a real run re-ran 16
+  build cycles. And a bare resume over a tree **identical** to the one that
+  failed is refused outright (the run's failure fingerprint is stamped by
+  `settle()` into `last_failure_stamp.json` and compared on the next
+  `ensure()`): re-running everything unchanged cannot end differently.
+  Exemptions: a pending verdict (bounded continuation), an armed engine-death
+  marker (relay recovery), a manual stop / spent budget (deliberate pauses),
+  or the explicit `--retry-unchanged` flag. The same unchanged-tree rule now
+  also guards the two `replay: false` phases individually: the `/qa` `audit`
+  and `ui_verify` refuse to re-judge a tree they already rejected (markers
+  `audit-attempts.json` / `ui-verify-attempts.json`; the shared fingerprint
+  machinery lives in `imp/modules/tree-guard.mjs`).
 
 **Rollout matters here**: `imp/fia.config.yaml` is student-owned and
 `--update-runtime` never rewrites it (§14.2). Every existing project therefore

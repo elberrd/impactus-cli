@@ -205,13 +205,21 @@ Rules for the loop:
   report it in one line (what failed → what you fixed) and continue.
   Progress means each failure is a DIFFERENT gap than the last: fixing
   one gate violation often reveals the next, and that chain is yours to
-  walk without asking. STOP and hand the evidence (`fda:phases`, gate
-  violations, envelope) only when: the SAME violation returns (no
-  progress), the outcome is `no_progress` / `attempt_cap` /
-  `budget_exhausted` / `engine_exhausted` (login/limit), or
-  `verdict set` refuses because the run's recovery budget is spent —
-  that cap is enforced in code, never worked around, and it is what
-  makes this loop safe to run without asking. Always include your
+  walk without asking. A BARE resume (no verdict) is legitimate only
+  when the tree changed since the failure or an engine died — the
+  runner refuses an identical-tree resume and counts every bare resume
+  against the run's combined recovery budget; treat a refusal as
+  STOP-and-ask (`--retry-unchanged` is the engineer's override, never
+  yours). From the third recovery of one run onward, prefer converting
+  the remaining gaps into a FOLLOW-UP brief via the task-sequencer —
+  a fresh run starts with small sessions and clean context. STOP and
+  hand the evidence (`fda:phases`, gate violations, envelope) only
+  when: the SAME violation returns (no progress), the outcome is
+  `no_progress` / `attempt_cap` / `budget_exhausted` /
+  `engine_exhausted` (login/limit), or `verdict set` / the resume
+  itself refuses because the run's recovery budget is spent — both
+  caps are enforced in code, never worked around, and they are what
+  make this loop safe to run without asking. Always include your
   recommended fix in the STOP report; if the engineer then answers
   "continue" (or equivalent), that IS the authorization for exactly
   that recommendation — execute it, never re-ask. A recovery verdict
