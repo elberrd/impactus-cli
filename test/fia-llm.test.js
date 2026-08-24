@@ -152,3 +152,43 @@ test('a backup accumulates per switch (nothing is ever overwritten in place)', (
   const backups = readdirSync(join(root, 'imp', 'data', 'backups')).filter((f) => f.startsWith('fia.config.'));
   assert.ok(backups.length >= 1, 'at least one backup kept');
 });
+
+// ── Grok Build (xAI subscription) through the switcher ──────────────────────
+
+test('resolveTarget: grok-<version> ids and "grok 4.6" route to the grok engine', () => {
+  assert.deepEqual(resolveTarget('grok-4.6'), { coding_agent: 'grok', model: 'grok-4.6' });
+  assert.deepEqual(resolveTarget('grok 4.6'), { coding_agent: 'grok', model: 'grok-4.6' });
+  assert.deepEqual(resolveTarget('grok-4.5', { engine: 'grok' }), { coding_agent: 'grok', model: 'grok-4.5' });
+  // The per-token route is still spelled provider/id on pi — a different thing on purpose.
+  assert.deepEqual(resolveTarget('xai/grok-4.6'), { coding_agent: 'pi', model: 'xai/grok-4.6' });
+});
+
+test('applyChange: grok accepts its own effort ladder and refuses claude-only tiers', () => {
+  const { root, configPath } = makeProject();
+  const result = applyChange({ root, configPath }, { agent: 'builder', target: 'grok-4.6', effort: 'xhigh' });
+  assert.deepEqual(result.to, { coding_agent: 'grok', model: 'grok-4.6' });
+  const view = rosterView(configPath);
+  assert.equal(view.agents[1].coding_agent, 'grok');
+  assert.equal(view.agents[1].effort, 'xhigh');
+  assert.ok(!result.warnings.some((w) => /API key/.test(w)), 'subscription engine — no per-token warning');
+  assert.throws(
+    () => applyChange({ root, configPath }, { agent: 'builder', target: 'grok-4.6', effort: 'max' }),
+    /grok effort must be low\|medium\|high\|xhigh/,
+  );
+});
+
+test('runCli --json exposes the grok ladder alongside the claude one', async () => {
+  const { root } = makeProject();
+  const logs = [];
+  const origLog = console.log;
+  console.log = (...a) => logs.push(a.join(' '));
+  try {
+    assert.equal(await runCli(['--json'], { root }), 0);
+    const payload = JSON.parse(logs.at(-1));
+    assert.deepEqual(payload.grok_efforts, ['low', 'medium', 'high', 'xhigh']);
+    assert.ok(payload.coding_agents.includes('grok'));
+    assert.ok('grok' in payload.engines, 'engine snapshot carries grok');
+  } finally {
+    console.log = origLog;
+  }
+});

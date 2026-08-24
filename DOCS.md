@@ -1118,12 +1118,15 @@ Every runner shares the same CLI contract:
 
 ```
 node imp/fda_<name>.mjs "<prompt-or-brief-path>" [--config imp/fia.config.yaml]
-                        [--fda-id <id>] [--resume] [--agent <name>] [--debug]
+                        [--fda-id <id>] [--resume] [--retry-unchanged]
+                        [--llm "<spec>"]… [--agent <name>] [--debug]
 ```
 
 The prompt may be inline text or a **file path** (a brief file is inlined).
 `--resume` requires `--fda-id` and may omit the prompt — it is reloaded from
-the trace. `--agent` is only read by `fda_prompt`. `--debug` (or env
+the trace. `--retry-unchanged` overrides the unchanged-tree guard on a bare
+resume (§9.7). `--llm` runs THIS run on another LLM without touching the
+roster (§9.3). `--agent` is only read by `fda_prompt`. `--debug` (or env
 `FIA_DEBUG`) prints full stack traces. A failed run always prints the exact
 resume command (`node imp/fda_<name>.mjs --fda-id <id> --resume`) — nothing
 is lost. Exit codes: 0 accepted · 1 any failure (including "phases green but
@@ -1164,6 +1167,7 @@ node imp/fda_quick.mjs "Make the empty-state copy on /invoices friendlier"
 node imp/fda_qa.mjs "M1"
 node imp/fda_sdlc.mjs ai-docs/todos/briefs/task-12.md
 node imp/fda_plan_build_test.mjs --fda-id 3fa9c21b --resume     # resume a failed run
+node imp/fda_sdlc.mjs ai-docs/todos/briefs/task-12.md --llm "grok-4.6 high"   # this run on another LLM
 ```
 
 An engine exit without a parseable Report envelope fails fast with the last
@@ -1268,6 +1272,22 @@ Engines (`coding_agent`):
 | `claude_code` | `claude` (override `CLAUDE_PATH`) | `sonnet`, `opus`, `haiku`, `fable`, or full names | Runs on the Claude Pro/Max plan. `effort` sets reasoning depth; system prompt via `--append-system-prompt` (preserves the cacheable prefix). |
 | `pi` | `pi` (override `PI_PATH`) | `openai-codex/gpt-5.6-sol`, `openrouter/…`, `xai/…`, `github-copilot/…` | Session continuity via a session FILE; `thinking` sets reasoning; per-agent `tools` and `harness_engineering` (Pi extensions). Subscription providers log in via `/login openai-codex` / `github-copilot`; API-key providers read their env var (`OPENROUTER_API_KEY`, `XAI_API_KEY`, …). |
 | `cursor` | `cursor-agent` (override `CURSOR_AGENT_PATH`) | picker ids like `sonnet-4.5`, `gpt-5`, `composer-1` | Cursor subscription; no token usage reported; system prompt is prepended to the first prompt. |
+| `grok` | `grok` (override `GROK_PATH`; `~/.grok/bin/grok` is found even off PATH) | `grok-4.6`, `grok-4.5` (`grok models`) | Grok Build on the **xAI subscription** — `grok login` once (OAuth; the OIDC token in `~/.grok/auth.json` refreshes itself, and that file is what the FIA detects). Headless via `-p` + `--output-format streaming-messages-json` (the Claude stream-json dialect, so tool calls show live in the viewer/TUI); `--resume <id>` continues the session; role via `--rules` (append — never `--system-prompt-override`, the cacheable prefix stays); `effort` low\|medium\|high\|xhigh, clamped per model. `XAI_API_KEY` is stripped from the child env (with it the CLI bills per token). The first grok run trusts the project folder once (`~/.grok/trusted_folders.toml`) — untrusted, grok skips the project hooks in silence. |
+
+**One run on another LLM — `--llm`.** Every FDA accepts `--llm "<spec>"`
+(repeatable): `[<agent>[,<agent>]=]<model>[ <level>]`. `--llm "grok-4.6 high"`
+puts EVERY agent phase of that run on Grok 4.6 at high; `--llm "builder=opus
+xhigh"` only the builder; `--llm "reviewer,scout=openai-codex/gpt-5.6-sol"`
+keeps each agent's own level, clamped to the new engine's ladder. The roster
+on disk is never written: the switch is printed at run start, traced as
+`llm_override` (payload: agent, from, to, level_given, spec, source) and saved
+in `imp/data/sessions/<fda_id>/llm_override.json`, so `--resume` re-applies it
+without the flag (a model that changed mid-run would break the engine session
+and the cache); an explicit `--llm` on resume replaces it. An explicit level
+applies to every phase of that agent for the run (the roster's
+`phase_overrides` are dropped for it); declared `fallbacks` still apply if the
+chosen engine is unavailable. Inside Pi: `/task 12 --llm "grok 4.6 high"`.
+Same grammar as `imp llm set` (`modules/llm-target.mjs` is the single resolver).
 
 **Fallbacks** (up to 5 per agent) are walked in three stages. At **run start**,
 for *hard* unavailability (binary missing; Pi provider with no login and no API
@@ -1416,8 +1436,18 @@ as disproportionate.
   notice at session start (SessionStart hook) and a PreToolUse hook blocks
   file edits and write-shaped bash commands (incl. `git commit`/`add`/…)
   aimed inside the repo — an external write mid-run would be attributed to
-  the phase agent and rolled back. Interactive Pi gets the same guard via the
-  `.pi/extensions/fda-lock.ts` extension, and Cursor via the
+  the phase agent and rolled back. **Grok Build reads the same
+  `.claude/settings.json`**, so both PreToolUse gates (this one and the
+  desktop guard) serve two dialects at once: the payload is read as
+  `tool_name|toolName` / `tool_input|toolInput`, grok's own tool ids count as
+  write/shell surfaces (`search_replace`, `run_terminal_command`), and a block
+  answers in both protocols in one object — exit 2 + the reason on stderr
+  (Claude Code) plus a stdout JSON carrying `decision: "deny"` and
+  `hookSpecificOutput` (grok honors the JSON regardless of the exit code). A
+  hook that speaks only one dialect is a **silent no-op** on the other engine,
+  which is why grok also needs the project folder trusted — granted
+  automatically before the first grok phase (§9.3). Interactive Pi gets the
+  same guard via the `.pi/extensions/fda-lock.ts` extension, and Cursor via the
   `.cursor/hooks.json` `beforeShellExecution` hook
   (`.cursor/hooks/fda-lock-cursor.mjs` — Cursor has no before-edit hook, so
   shell commands are the guarded surface; stray agent edits are still swept
@@ -1520,9 +1550,14 @@ for the same reason. Four views, each a URL hash that survives reload:
   (component registry, `/ui-components` probe) and every `ai-docs/` document
   rendered, plus an `inbox · N open` badge.
 - **Agents** (`npm run agents`) — engine cards with install/login state and
-  fix hints per provider, the commands → phases → agents map, and the roster
+  fix hints per provider (Claude, Pi + its providers, Cursor and Grok Build —
+  the grok card shows the subscription login, its model list, whether the
+  project folder is trusted yet and a flag when `XAI_API_KEY` is set in the
+  environment), the commands → phases → agents map, and the roster
   editor: engine/model/reasoning/fallbacks per agent, curated model pickers
-  (live `cursor-agent --list-models` when Cursor is installed), a billing
+  (live `cursor-agent --list-models` when Cursor is installed, grok's own
+  `models_cache.json` when Grok Build is), reasoning pills that follow each
+  engine's ladder (grok stops at `xhigh`), a billing
   guard banner for `anthropic/…` models on the Pi engine, and a save that
   edits the YAML **preserving comments**, backs up first
   (`imp/data/backups/fia.config.<stamp>.yaml`) and answers **409** while a
@@ -2524,8 +2559,8 @@ update_roster.
 | `/grill` | `[doc\|topic?]` | Stress-test the PRD one question at a time; decisions recorded and written back. |
 | `/prd` | `[focus?]` | Quick reviewer opinion on the PRD — never edits it. |
 | `/map` | `[notes?]` | Runs a conditional architecture checkpoint before planning; consequential decisions land in optional `architecture.md`, while simple plans skip it. Then PRD → `map.yaml` + screens-routes + issues/task-master + specs + registry seed + `/ui-components` + milestones; ends by opening the Plan page. |
-| `/task` | `[number\|description?]` | ONE task: the task-sequencer writes the brief (enforcing the theme and env gates); exact `Mode: prototype` → `fda_prototype`, otherwise `fda_plan_build_test` (bigger/riskier normal work → `fda_sdlc`). On first failure: one automatic recovery (re-run / repair once); if that also fails: `npm run fda:phases -- <id>`, resume with `--fda-id <id> --resume`. |
-| `/goal` | `[limit?] [--light]` | All unblocked tasks to done, one FDA per task (never batched), gates inside the loop, human-only steps handled MID-goal; `Mode: prototype` selects `fda_prototype` per brief, otherwise `--light` selects `fda_plan_build_test` and the default is `fda_sdlc`; on failure it recovers automatically while each failure names a NEW gap (the per-run recovery budget is capped in code by `verdict.mjs`), stopping only on a repeated violation, a terminal outcome or a spent budget — always with its recommended fix, which a plain "continue" from the engineer authorizes; every completed milestone automatically runs blocking `fda_qa`, drains docs with one `fda_document` and — when other milestones remain — ends the loop at the boundary with a 5-line handoff (one milestone per session: state is durable in `ai-docs/`, and a fresh session drops the orchestrator's accumulated context); ends with the app RUNNING + "How to test", then `/launch`. |
+| `/task` | `[number\|description?] [--llm "<spec>"]` | ONE task: the task-sequencer writes the brief (enforcing the theme and env gates); exact `Mode: prototype` → `fda_prototype`, otherwise `fda_plan_build_test` (bigger/riskier normal work → `fda_sdlc`). On first failure: one automatic recovery (re-run / repair once); if that also fails: `npm run fda:phases -- <id>`, resume with `--fda-id <id> --resume`. `--llm "grok 4.6 high"` (or plain words — "on opus xhigh", "builder on codex") is passed through to the FDA as the run-scoped override (§9.3); the roster is never edited for it. |
+| `/goal` | `[limit?] [--light] [--llm "<spec>"]` | All unblocked tasks to done, one FDA per task (never batched), gates inside the loop, human-only steps handled MID-goal; `Mode: prototype` selects `fda_prototype` per brief, otherwise `--light` selects `fda_plan_build_test` and the default is `fda_sdlc`; on failure it recovers automatically while each failure names a NEW gap (the per-run recovery budget is capped in code by `verdict.mjs`), stopping only on a repeated violation, a terminal outcome or a spent budget — always with its recommended fix, which a plain "continue" from the engineer authorizes; every completed milestone automatically runs blocking `fda_qa`, drains docs with one `fda_document` and — when other milestones remain — ends the loop at the boundary with a 5-line handoff (one milestone per session: state is durable in `ai-docs/`, and a fresh session drops the orchestrator's accumulated context); ends with the app RUNNING + "How to test", then `/launch`. |
 | `/feature` | `"request"` | Delta on an existing mapped system: size triage (module-sized routes UP to `/idea`), delta mini-grill, delta spec, DELTA tasks, approval before executing. Requires `map.yaml` (`/absorb` first otherwise). |
 | `/bug` | `"symptom"` | Classifies `direct` vs `rca`; ambiguous/risky defects get a versioned investigation and critical/sensitive/low-confidence RCAs require approval before claim. Then `fda_bug` enforces an assertion-failing reproduction before any fix. |
 | `/quick` | `"small change"` | Triage; SIMPLE runs `node imp/fda_quick.mjs` + the `Q-NNN` quick-log entry; COMPLEX routes to `/feature`/`/bug` naming the failed criterion. |
@@ -2539,7 +2574,7 @@ update_roster.
 | `/design` | `images + scope` | Layout redesign from references — structure from the image, identity from OUR system. |
 | `/example` | `URL [notes] \| list` | Register an external reference on the shelf (license researched, `What NOT to take` mandatory). After adding one, cite its NOTES in `/grill ai-docs/PRD.md`, then run `/map` to reconcile approved PRD additions into open specs/tasks before implementation. |
 | `/agents` | — | Opens the viewer's Agents tab (`npm run agents -- --detach`) to edit engines/models/fallbacks; Pi is forbidden from editing `imp/fia.config.yaml` itself. |
-| `/llm` | `["1 → fable"?]` | Numbered list of the FDA agents with the LLM each one runs on (phases included); the student answers by number or name and the switch is applied via `imp/scripts/fia-llm.mjs set` — the same comment-preserving, backed-up, run-locked write path as the Agents tab. Terminal twin: `imp llm` / `npm run llm`. |
+| `/llm` | `["1 → fable"?]` | Numbered list of the FDA agents with the LLM each one runs on (phases included); the student answers by number or name and the switch is applied via `imp/scripts/fia-llm.mjs set` — the same comment-preserving, backed-up, run-locked write path as the Agents tab. Engines: `claude_code`, `pi` (Codex/any provider), `cursor`, `grok` (Grok Build — `grok-4.6`/`grok-4.5`). A model asked for "just this task" is NOT a roster change: that is `--llm` on the run (§9.3). Terminal twin: `imp llm` / `npm run llm`. |
 | `/defer` | `[n \| resume n]` | Postpone a task that cannot proceed right now (missing API keys, a paid account for later, a pending decision) — via `imp/scripts/task-defer.mjs`, never by hand: status → `deferred` in issue + index, its sealed holdout probes renamed `NN-*` → `_NN-*` (content untouched, reversible), deferral ledgered in `imp/data/deferrals.json` + noted in the inbox. `resume n` restores everything and sets `pending`. Refuses while an FDA run is live; the launch check warns about every open deferral. Terminal twin: `imp defer` / `npm run defer`. |
 | `/onboarding` | `[focus?] [--report-only]` | First command on an EXISTING system: chains `/absorb` → `/stack` → `/kit` in one guided pass (each stage's own prompt is the law; stages whose artifacts already exist can be kept and skipped), then hands over explaining the split — `/idea` for a MODULE-sized addition vs `/feature` for a one-sentence delta. The tour keeps a **resume rail** in the decision log (`open onboarding` → one stage note each → `close`): an interrupted session resumes from its last stage note instead of restarting. `--report-only` is the express path — the `/kit` stage presents its gap report and defers the design decisions to a later `/kit` run. |
 | `/absorb` | `[focus?]` | Brownfield onboarding (as-built PRD/map/conventions/registry, maintained wiki + digest stamp, and one canonical project skill in `.agents/skills/project/` with a Claude symlink; never `.pi` or `.cursor` copies). Divergent legacy copies in any engine stop for an explicit choice. |
@@ -2826,7 +2861,7 @@ Four sections (five with `--gates`):
 
 | Section | What it checks |
 |---|---|
-| **Engines (subscriptions)** | `claude` on PATH, the Codex login inside Pi (`~/.pi/agent/auth.json`), the Cursor CLI. **Informative, never an error** — which subscriptions to use is the professional's call. There is deliberately no `claude` login probe: no heuristic is reliable and `claude` walks the user through login on first run (same rationale as the preflight, §3.2). |
+| **Engines (subscriptions)** | `claude` on PATH, the Codex login inside Pi (`~/.pi/agent/auth.json`), the Cursor CLI, and Grok Build (`grok` on PATH or `~/.grok/bin/grok`, plus the subscription login in `~/.grok/auth.json`). **Informative, never an error** — which subscriptions to use is the professional's call. There is deliberately no `claude` login probe: no heuristic is reliable and `claude` walks the user through login on first run (same rationale as the preflight, §3.2). |
 | **Core CLIs** | node (the >= 22.12 floor), git and npm as required; gh and vercel as optional. |
 | **Pi & imp** | Pi installed + version, the three exact-pinned extension packages, and the same update probe the launcher prints after a session — timeboxed at 4 s, so offline or a slow registry just drops those rows instead of holding the report. |
 | **Project** (only when the folder looks like an IAI project) | FIA runtime present (`imp/scripts` + `imp/fia.config.yaml`); `.mcp.json` hygiene; the harness stamp state; a summarized `--verify` audit (capped at 8 rows — the full report stays in `npx impactus --verify`). |
@@ -3066,14 +3101,21 @@ imp rewind --run 3fa9c21b --yes          # restore them (no reset, nothing commi
 
 ```bash
 npm run agents               # opens the viewer's Agents tab (or /agents inside pi)
-# pick engine (claude_code | pi | cursor), model, reasoning and a fallback chain
-# per agent; Save preserves the YAML comments and backs the file up. Locked
-# while an FDA runs; applies from the next run.
+# pick engine (claude_code | pi | cursor | grok), model, reasoning and a fallback
+# chain per agent; Save preserves the YAML comments and backs the file up.
+# Locked while an FDA runs; applies from the next run.
+imp llm                      # numbered list; `imp llm set builder grok-4.6 --effort high`
+# ONE run only, roster untouched (saved with the run, so --resume keeps it):
+node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md --llm "grok-4.6 high"
+node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md --llm "builder=opus xhigh" --llm "reviewer=grok-4.5"
 ```
 
 Or edit `imp/fia.config.yaml` by hand — remember the billing rule: Claude
 agents use `coding_agent: claude_code` (the plan); Claude INSIDE Pi bills per
-token as extra usage.
+token as extra usage. Grok Build (`coding_agent: grok`) is recognized
+automatically once `grok login` has been done — never set `XAI_API_KEY` for
+it (that is the per-token API route; the FIA strips the variable from grok
+runs).
 
 ### 15.6 Activate a service key later
 
@@ -3237,7 +3279,8 @@ Recognized by the FIA runtime inside a project:
 | `FIA_DEBUG` | Same as `--debug` on any FDA (full stack traces). |
 | `FIA_FDA_RUN` | Exported BY the runner into its child agents — makes the fda-lock hooks/extension silent for the run's own process tree. Never set it yourself. |
 | `ENGINEER_NAME` | Engineer identity stamped in the trace (fallback: `git config user.name` → `$USER`). |
-| `PI_PATH` / `CLAUDE_PATH` / `CURSOR_AGENT_PATH` | Engine binary overrides (`pi` / `claude` / `cursor-agent`). |
+| `PI_PATH` / `CLAUDE_PATH` / `CURSOR_AGENT_PATH` / `GROK_PATH` | Engine binary overrides (`pi` / `claude` / `cursor-agent` / `grok`). |
+| `XAI_API_KEY` (as seen by the `grok` engine) | Never read by the grok engine — REMOVED from every grok child env, because the CLI would switch to per-token API billing. It remains the key of the Pi `xai/…` provider (row below). |
 | `PI_SESSIONS_DIR` | Override for the viewer's interactive-Pi session dir (`~/.pi/agent/sessions/<slug>`). |
 | `IAI_DECISION_LOG_NOW` | Fixed timestamp for decision-log/stack-research, the loop-health report and the `updated:` line `wiki-check.mjs --stamp` writes (tests). |
 | `OPENROUTER_API_KEY`, `XAI_API_KEY`, `GROQ_API_KEY`, `GEMINI_API_KEY`, `FIREWORKS_API_KEY`, `DEEPSEEK_API_KEY`, `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` | Pi API-key providers (per-token billing — the subscription providers `openai-codex`/`github-copilot` log in via `/login` instead). |

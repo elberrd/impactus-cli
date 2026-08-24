@@ -12,11 +12,23 @@
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { parse as parseYaml, parseDocument } from 'yaml';
-import { MAX_FALLBACKS } from '../modules/engines.mjs';
+import { ENGINE_NAMES, GROK_EFFORTS, MAX_FALLBACKS } from '../modules/engines.mjs';
 
 export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'];
 export const THINKING = ['minimal', 'low', 'medium', 'high'];
-export const CODING_AGENTS = ['claude_code', 'pi', 'cursor'];
+/** claude_code | pi | cursor | grok — ONE list, read from the engine registry. */
+export const CODING_AGENTS = [...ENGINE_NAMES];
+export { GROK_EFFORTS };
+
+/** The `effort` problem for an entry, or null: grok has a shorter ladder than claude. */
+function effortIssue(entry) {
+  if (entry.effort == null) return null;
+  if (!EFFORTS.includes(entry.effort)) return `effort must be ${EFFORTS.join('|')}`;
+  if (entry.coding_agent === 'grok' && !GROK_EFFORTS.includes(entry.effort)) {
+    return `grok effort must be ${GROK_EFFORTS.join('|')} (Grok Build has no max/ultracode)`;
+  }
+  return null;
+}
 
 export const modelOk = (m) => typeof m === 'string' && m.trim() && m.length <= 200 && !/[\n\r]/.test(m);
 
@@ -63,7 +75,8 @@ export function validateRosterPatch(patch) {
     if (!a || typeof a.name !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(a.name)) return 'agent name missing or invalid';
     if (!CODING_AGENTS.includes(a.coding_agent)) return `${a.name}: coding_agent must be one of ${CODING_AGENTS.join('|')}`;
     if (!modelOk(a.model)) return `${a.name}: model is required`;
-    if (a.effort != null && !EFFORTS.includes(a.effort)) return `${a.name}: effort must be ${EFFORTS.join('|')}`;
+    const effortProblem = effortIssue(a);
+    if (effortProblem) return `${a.name}: ${effortProblem}`;
     if (a.thinking != null && !THINKING.includes(a.thinking)) return `${a.name}: thinking must be ${THINKING.join('|')}`;
     if (a.fallbacks !== undefined) {
       if (!Array.isArray(a.fallbacks) || a.fallbacks.length > MAX_FALLBACKS)
@@ -72,7 +85,7 @@ export function validateRosterPatch(patch) {
         if (!fb || !CODING_AGENTS.includes(fb.coding_agent) || !modelOk(fb.model)) {
           return `${a.name}: each fallback needs coding_agent and model`;
         }
-        if (fb.effort != null && !EFFORTS.includes(fb.effort)) return `${a.name}: fallback effort invalid`;
+        if (effortIssue(fb)) return `${a.name}: fallback ${effortIssue(fb)}`;
         if (fb.thinking != null && !THINKING.includes(fb.thinking)) return `${a.name}: fallback thinking invalid`;
       }
     }

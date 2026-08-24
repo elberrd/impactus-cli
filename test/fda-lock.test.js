@@ -266,3 +266,38 @@ test(
     assert.throws(() => acquireLock(join(root, 'imp', 'data'), 'newrun'), /already active/);
   },
 );
+
+// ── Grok Build dialect: camelCase payload, grok tool ids, bilingual deny ─────
+
+test('gateDecision: reads the grok payload (toolName/toolInput, search_replace/run_terminal_command)', () => {
+  const root = projectWith(LIVE);
+  const ctx = { root, lock: LIVE };
+  assert.equal(
+    gateDecision({ toolName: 'search_replace', toolInput: { file_path: 'src/a.ts', old_string: 'a', new_string: 'b' } }, ctx).block,
+    true,
+    'grok edits arrive as search_replace + file_path',
+  );
+  assert.equal(gateDecision({ toolName: 'run_terminal_command', toolInput: { command: 'rm src/a.ts' } }, ctx).block, true);
+  assert.equal(gateDecision({ toolName: 'run_terminal_command', toolInput: { command: 'npm test' } }, ctx).block, false);
+  assert.equal(gateDecision({ toolName: 'read_file', toolInput: { target_file: 'src/a.ts' } }, ctx).block, false, 'reads stay allowed');
+  assert.equal(gateDecision({ toolName: 'search_replace', toolInput: { file_path: join(tmpdir(), 'x.txt') } }, ctx).block, false);
+});
+
+test('gate CLI: a grok-dialect block answers in BOTH dialects (exit 2 + stderr + stdout JSON deny)', () => {
+  const root = projectWith(LIVE);
+  const r = runScript(['gate'], {
+    root,
+    input: JSON.stringify({ hookEventName: 'pre_tool_use', cwd: root, toolName: 'search_replace', toolInput: { file_path: join(root, 'src', 'a.ts') } }),
+  });
+  assert.equal(r.status, 2);
+  assert.match(r.stderr, /FIA run active/);
+  const out = JSON.parse(r.stdout.trim());
+  assert.equal(out.decision, 'deny', 'grok reads decision/reason');
+  assert.match(out.reason, /FIA run active/);
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'deny', 'Claude Code reads hookSpecificOutput');
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PreToolUse');
+  // Allowed calls print nothing at all on stdout (no stray JSON for either host).
+  const ok = runScript(['gate'], { root, input: JSON.stringify({ toolName: 'read_file', toolInput: { target_file: 'x' } }) });
+  assert.equal(ok.status, 0);
+  assert.equal(ok.stdout.trim(), '');
+});

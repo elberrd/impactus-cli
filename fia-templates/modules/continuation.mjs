@@ -52,7 +52,8 @@ const MISSING_CAP = 20; // a verdict is a scope, not a backlog
 export function classifyEngineFailure(text) {
   const t = String(text || '').toLowerCase();
   if (
-    /log ?in|logged out|log out|credential|unauthorized|unauthenticated|authentication|auth error|401|token expired|expired token/.test(
+    // "not authenticated" is grok's exact logged-out wording.
+    /log ?in|logged out|log out|credential|unauthorized|unauthenticated|not authenticated|authentication|auth error|401|token expired|expired token/.test(
       t,
     )
   ) {

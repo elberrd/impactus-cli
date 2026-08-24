@@ -65,7 +65,9 @@ Symptom: $@
    Omit the investigation path for a direct bug. Never run this while an FDA
    is active; without the script, continue without inventing a replacement.
 
-7. Run `node imp/fda_bug.mjs ai-docs/actual-todo/<brief>.md` and follow along.
+7. Run `node imp/fda_bug.mjs ai-docs/actual-todo/<brief>.md` and follow along
+   (an LLM named in my request for this run — `--llm "…"`, "on grok 4.6 high"
+   — goes on that command as `--llm "<my words>"`; never into the roster).
    Tell me, in one line, that the FDA gates the RED for validity: the
    reproduction test must fail on a real assertion — a passing test means "bug
    not reproduced", and a module/syntax/env failure doesn't count as proof.

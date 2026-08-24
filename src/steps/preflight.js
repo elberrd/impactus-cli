@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { has, run, runInherit } from '../lib/proc.js';
 import { ensurePiReady, piCodexReady } from '../lib/pi-auth.js';
+import { grokLoggedIn, hasGrok } from '../lib/grok-auth.js';
 import { osKind, detectPackageManagers } from '../lib/platform.js';
 import * as ui from '../lib/ui.js';
 
@@ -26,10 +27,12 @@ export const CLAUDE_INSTALL_HINT = {
 // walks the user through its own login on first run anyway.
 
 export async function checkEngines(ctx = {}) {
-  ui.step('Checking the engines (Claude Code and Codex)…');
+  ui.step('Checking the engines (Claude Code, Codex and Grok Build)…');
   const claude = await has('claude');
   const codex = piCodexReady();
-  ctx.engines = { claude, codex };
+  const grokInstalled = await hasGrok();
+  const grok = grokInstalled && grokLoggedIn();
+  ctx.engines = { claude, codex, grok };
 
   if (claude) {
     ui.success('Claude Code found.');
@@ -42,8 +45,15 @@ export async function checkEngines(ctx = {}) {
   } else {
     ui.info('Codex login not done yet — normal: it is the last step, inside Pi (/login openai-codex).');
   }
+  // Grok Build is a third subscription engine — purely optional, recognized
+  // automatically when its login exists (never a warning when absent).
+  if (grok) {
+    ui.success('Grok Build login found (xAI subscription) — available as an engine.');
+  } else if (grokInstalled) {
+    ui.info('Grok Build installed but not logged in — `grok login` enables it as an engine (optional).');
+  }
 
-  if (!claude && !codex) {
+  if (!claude && !codex && !grok) {
     ui.note(
       [
         'Neither Claude Code nor a Codex login was found. Nothing stops here —',

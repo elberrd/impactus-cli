@@ -25,6 +25,13 @@ if the engineer's instructions contain `--light`, use
 `fda_plan_build_test.mjs`; the default is `fda_sdlc.mjs`. Prototype takes
 precedence over `--light` because it is the brief's explicit per-task opt-in.
 
+**LLM for this goal run only:** `--llm "…"` in my instructions (or words like
+"on grok 4.6 high", "builder on opus xhigh") is appended verbatim as
+`--llm "<my words>"` to EVERY FDA this loop dispatches (repeat the flag per
+agent when I name several). The script normalizes and validates it, prints
+the `old → new` line at each run start and keeps it on `--resume`. Never edit
+`imp/fia.config.yaml` for this — a durable switch is `/llm`.
+
 Loop, until no unblocked task remains OR a milestone boundary closes (step 3):
 
 1. `task-sequencer` → next unblocked issue → brief in `ai-docs/actual-todo/`

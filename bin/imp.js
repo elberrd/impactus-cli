@@ -61,7 +61,7 @@ Usage:
                          all impactus flags work — see \`imp init --help\`)
   imp update             Update impactus, Pi and the Pi extension packages
   imp tui                Terminal dashboard — tasks, specs and runs (same as npm run tui)
-  imp doctor             Read-only checkup: subscriptions (Claude/Codex/Cursor),
+  imp doctor             Read-only checkup: subscriptions (Claude/Codex/Cursor/Grok),
                          CLIs, Pi and this project (--json for machine output).
                          --gates additionally self-tests the FIA gates: injects
                          deliberate defects against throwaway fixtures and
@@ -78,9 +78,11 @@ Usage:
                          (works while Codex is down; --list picks a session)
   imp llm                List the FDA agents (phase owners) numbered, each with
                          the LLM it runs on, and switch any by number or name:
-                         \`imp llm set 1 fable\`. Interactive on a TTY; --json
-                         for machines; same rules as /agents (comments kept,
-                         backup first, locked while a run is live)
+                         \`imp llm set 1 fable\`, \`imp llm set builder grok-4.6
+                         --effort high\`. Interactive on a TTY; --json for
+                         machines; same rules as /agents (comments kept, backup
+                         first, locked while a run is live). One run only:
+                         node imp/fda_*.mjs "<prompt>" --llm "grok-4.6 high"
   imp defer              Postpone a task that cannot proceed now (missing API
                          keys, a pending decision): \`imp defer <n>\` quarantines
                          its sealed holdout probes (rename only — reversible),

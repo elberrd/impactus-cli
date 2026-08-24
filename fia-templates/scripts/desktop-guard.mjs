@@ -91,11 +91,38 @@ export function blockReason(hit) {
   );
 }
 
-/** PreToolUse verdict for a Claude hook payload → { block, reason? }. */
+// Shell tool ids across the two hook dialects this guard serves: Claude Code
+// (`Bash`, snake_case payload) and Grok Build, which reads .claude/settings.json
+// for compatibility but sends camelCase (`toolName`/`toolInput`) with its own
+// tool ids. Reading only one dialect makes the other engine's guard a silent
+// no-op — and this guard is the one that must never be.
+const SHELL_TOOLS = new Set(['Bash', 'run_terminal_command', 'run_terminal_cmd']);
+
+/** PreToolUse verdict for a Claude Code or Grok Build hook payload → { block, reason? }. */
 export function gateDecision(hook) {
-  if (hook?.tool_name !== 'Bash') return { block: false };
-  const hit = blockedDesktopControl(hook?.tool_input?.command);
+  const tool = String(hook?.tool_name ?? hook?.toolName ?? '');
+  if (!SHELL_TOOLS.has(tool)) return { block: false };
+  const input = hook?.tool_input ?? hook?.toolInput ?? {};
+  const hit = blockedDesktopControl(input?.command);
   return hit ? { block: true, reason: blockReason(hit) } : { block: false };
+}
+
+/**
+ * Deny in BOTH dialects at once (same shape as fda-lock.mjs): exit 2 + reason
+ * on stderr for Claude Code, plus a stdout JSON with grok's `decision`/`reason`
+ * and Claude's `hookSpecificOutput`. Claude ignores stdout on exit 2; grok
+ * honors the JSON deny regardless of exit code.
+ */
+export function denyOutput(reason) {
+  console.error(reason);
+  console.log(
+    JSON.stringify({
+      decision: 'deny',
+      reason,
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+    }),
+  );
+  return 2;
 }
 
 /** Cursor beforeShellExecution verdict → { permission, … }. */
@@ -134,10 +161,7 @@ export async function runCli(argv, { input } = {}) {
     return 0; // unreadable hook payload → fail open
   }
   const verdict = gateDecision(hook);
-  if (verdict.block) {
-    console.error(verdict.reason);
-    return 2;
-  }
+  if (verdict.block) return denyOutput(verdict.reason);
   return 0;
 }
 

@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, rmSync, mkdirSync, linkSync, renameSync } 
 import { Tracer } from './tracer.mjs';
 import { Run } from './runner.mjs';
 import { engineerName, newId, nowIso } from './utils.mjs';
-import { resolveEngines } from './engines.mjs';
+import { ensureGrokTrust, resolveEngines } from './engines.mjs';
 import {
   RECOVERY_CAP,
   appendResumeHistory,
@@ -215,6 +215,27 @@ export function ensure(cfg, fdaId = null, { resume = false, retryUnchanged = fal
     );
   }
 
+  // Grok Build runs the project hooks (desktop guard, fda-lock) ONLY in a
+  // folder its trust store lists — untrusted, they are skipped in silence,
+  // which is the one failure mode a guard must never have. Granted here,
+  // once per machine+folder, before any grok phase can start; refused out
+  // loud when it cannot be (the exact command is in the message).
+  const grokAgents = (cfg.agents || []).filter(
+    (a) => a.coding_agent === 'grok' && (!cfg._required || cfg._required.includes(a.name)),
+  );
+  let grokTrust = null;
+  if (grokAgents.length) {
+    grokTrust = ensureGrokTrust(process.cwd());
+    if (!grokTrust.trusted) {
+      throw new Error(
+        `grok (Grok Build) would skip this project's hooks: the folder is not trusted in ~/.grok/trusted_folders.toml` +
+          (grokTrust.error ? ` and the automatic grant failed (${grokTrust.error})` : '') +
+          '.\nGrant it once, in the project root, then re-run:\n  grok --trust -p ok\n' +
+          `(agents on grok: ${grokAgents.map((a) => a.name).join(', ')})`,
+      );
+    }
+  }
+
   const id = fdaId || newId(8);
   acquireLock(dataDir, id);
   // Every child agent inherits this ({...process.env} in the engine spawns):
@@ -283,6 +304,10 @@ export function ensure(cfg, fdaId = null, { resume = false, retryUnchanged = fal
   }
   tracer.processStart(id, 'fda', '', process.pid, process.argv.join(' '));
   run.console.sessionStarted(id, run.engineer);
+  if (grokTrust?.granted) {
+    run.console.note('grok: project folder trusted for hooks (one-time, recorded in ~/.grok/trusted_folders.toml)');
+    tracer.event({ fda_id: id, type: 'log', name: 'grok_trust_granted', payload: { root: process.cwd() } });
+  }
   for (const d of decisions) {
     if (d.changed) {
       run.console.engineFallback(d.agent, d.from, d.to, d.reason);

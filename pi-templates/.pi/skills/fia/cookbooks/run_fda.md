@@ -9,11 +9,20 @@ node imp/fda_plan_build_test.mjs "implement the plan" --fda-id <id from plan run
 node imp/fda_build_test.mjs "brief is already autocontained — skip planner"
 node imp/fda_sdlc.mjs "full feature from ai-docs issue"   # planner auto-skips on self-contained briefs; review only on green suites; docs drain per milestone (sdlc: block)
 node imp/fda_prototype.mjs ai-docs/actual-todo/<brief-with-Mode-prototype>.md
+node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md --llm "grok 4.6 high"   # THIS run on another LLM; roster untouched
+node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md --llm "builder=opus xhigh" --llm "reviewer=grok-4.5"
 ```
 
 `fda_prototype` refuses prompts without an exact top-level `Mode: prototype`
 line. That marker is the deliberate authorization to skip tests and review;
 `/task` and `/goal` select the runner from it automatically.
+
+`--llm "[agent[,agent]=]<model> [<level>]"` is the run-scoped LLM override:
+the engineer's words go through verbatim (the script normalizes `grok 4.6`,
+clamps levels per engine, refuses ambiguous ids with the fix), the switch is
+printed and traced (`llm_override`), and it is saved with the run so
+`--resume` keeps the same LLM without repeating the flag. A durable change is
+`/llm` (`imp llm set …`), never a YAML edit by you.
 
 Watch:
 

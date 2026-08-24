@@ -34,8 +34,9 @@ npx impactus
 ```
 
 One command stamps your project with the **agent harness** plus the **FIA**,
-running entirely inside the AI subscriptions you already have (Claude Pro/Max
-and ChatGPT Plus/Pro) — no API keys, no per-token billing.
+running entirely inside the AI subscriptions you already have (Claude Pro/Max,
+ChatGPT Plus/Pro and — when you have it — Grok Build on xAI) — no API keys,
+no per-token billing.
 
 ## What the names mean
 
@@ -123,7 +124,9 @@ imp stop                       # the stop button: halts FDA runs cleanly before 
 imp handoff                    # continue the newest Pi conversation in `claude`
                                # (Codex outage? your work keeps moving)
 imp llm                        # numbered list of the FDA agents + the LLM each runs on;
-                               # switch by number or name (`imp llm set 1 fable`)
+                               # switch by number or name (`imp llm set 1 fable`,
+                               # `imp llm set builder grok-4.6 --effort high`);
+                               # one run only: node imp/fda_*.mjs … --llm "grok-4.6 high"
 imp defer                      # postpone a task blocked on something external (API keys,
                                # a decision): sealed probes quarantined reversibly;
                                # `imp defer resume <n>` brings it back
@@ -183,7 +186,7 @@ clear it.
 | `/grill [target]` | Stress-tests the PRD one question at a time, recording every decision. |
 | `/prd [focus]` | Quick reviewer opinion on the PRD. |
 | `/map` | Conditional architecture checkpoint → map + screens + tasks + milestones; opens the plan in the browser when done. Simple plans skip the checkpoint automatically. |
-| `/task [n]` | Runs ONE task end to end via FDA. A brief explicitly marked `Mode: prototype` uses the guarded lint/typecheck-only prototype flow. |
+| `/task [n] [--llm "<model> [level]"]` | Runs ONE task end to end via FDA. A brief explicitly marked `Mode: prototype` uses the guarded lint/typecheck-only prototype flow. `--llm "grok 4.6 high"` (or `"builder=opus xhigh"`) runs THAT task on another LLM without touching the roster — same flag on `/goal`, `/quick`, `/bug`. |
 | `/goal [--light]` | Runs ALL tasks until done. `Mode: prototype` applies per brief; otherwise `--light` skips review+document phases. A completed milestone automatically runs blocking browser QA before the next one. |
 | `/feature "what you want"` | New feature in an existing system: delta interview → delta spec + new tasks. |
 | `/bug "the symptom"` | Records the defect, runs proportional RCA when ambiguity/risk requires it, proves a valid failing test first (RED), then fixes it. |
@@ -197,7 +200,7 @@ clear it.
 | `/launch` | Go live — public beta and production, with readiness gates. |
 | `/qa [scope?]` | Browser QA at milestone/spec/task — Playwright e2e, responsive check, design audit, durable report. |
 | `/agents` | Visual roster editor: engine, model and fallbacks per FDA agent — with automatic mid-run relay when an engine dies. |
-| `/llm ["1 → fable"?]` | Quick model switch: numbered list of the FDA agents with the LLM each one runs on — answer by number or name and it's applied (same safe write path as `/agents`; also `imp llm` in a terminal). |
+| `/llm ["1 → fable"?]` | Quick model switch: numbered list of the FDA agents with the LLM each one runs on — answer by number or name and it's applied (same safe write path as `/agents`; also `imp llm` in a terminal). Engines: Claude Code, Codex/any Pi provider, Cursor and Grok Build (`grok-4.6`). |
 | `/defer [n \| resume n]` | Postpone a task that cannot proceed right now (missing API keys, a pending decision): status → deferred, sealed holdout probes quarantined reversibly; `resume` brings everything back (also `imp defer` in a terminal). The launch check warns about every open deferral. |
 | `/status` | Progress + latest runs. |
 | `/evolve --run <id>` / `--since <period>` | Evidence-backed retrospective of a finished FDA run or project-history window; writes local reports and never changes the system automatically. |
@@ -256,7 +259,7 @@ npx impactus --update-runtime --dir .  # 3. imp/ + .pi/ outdated? re-stamp from 
 imp update                             # 4. update the CLI itself, Pi and the pinned extensions
 ```
 
-`imp doctor` checks your subscriptions (Claude/Codex/Cursor), the core CLIs,
+`imp doctor` checks your subscriptions (Claude/Codex/Cursor/Grok Build), the core CLIs,
 Pi and — inside a project — the install itself, and every finding ends in the
 command that repairs it. `imp fix` only ever **restores what disappeared**
 (deleted harness/runtime/skill files, the `AGENTS.md` block) and never
@@ -384,9 +387,10 @@ the agent harness (skills, commands, gates) and the FIA runtime:
 - Recommended, **not required** (the installer only warns and keeps going):
   **Claude Code** with a Claude **Pro/Max** subscription, and/or — for FIA's
   Codex roles — a **ChatGPT Plus/Pro** subscription (login at the end via
-  `/login openai-codex` in Pi). With neither, everything still installs; you
-  get the best results with one of these, and other providers/models can be
-  added later inside Pi with `/login`.
+  `/login openai-codex` in Pi). **Grok Build** (`grok login`, xAI
+  subscription) is picked up automatically as a third engine when present.
+  With none, everything still installs; you get the best results with one of
+  these, and other providers/models can be added later inside Pi with `/login`.
 
 Everything runs inside these subscriptions — no API keys, no per-token
 billing.

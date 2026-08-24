@@ -20,12 +20,20 @@ Show me the LLM roster and let me switch models conversationally. $@
    the builder to opus", "2 → cursor sonnet-4.5-thinking"), apply it with the
    script — NEVER edit `imp/fia.config.yaml` yourself:
 
-   `node imp/scripts/fia-llm.mjs set <number|name> <model> [--engine claude_code|pi|cursor] [--effort …] [--thinking …]`
+   `node imp/scripts/fia-llm.mjs set <number|name> <model> [--engine claude_code|pi|cursor|grok] [--effort …] [--thinking …]`
 
    Model resolution the script already does (don't second-guess it): claude
    aliases (sonnet|opus|haiku|fable) and `claude-*` ids → `claude_code`;
-   `provider/id` → `pi`; bare cursor ids need `--engine cursor` (or say
-   "cursor <id>"). `anthropic/*` on pi is refused by design — extra usage.
+   `grok-4.6`/`grok-4.5` (or "grok 4.6") → `grok` (Grok Build, xAI
+   subscription — effort low|medium|high|xhigh); `provider/id` → `pi`; bare
+   cursor ids need `--engine cursor` (or say "cursor <id>"). `anthropic/*` on
+   pi is refused by design — extra usage.
+
+   If instead I ask for a model "just for this task / this run" ("run task 12
+   on grok 4.6 high"), that is NOT a roster change: tell me to say it on the
+   command (`/task 12 --llm "grok 4.6 high"`, `/goal --llm "builder=opus
+   xhigh"`) — or run it that way yourself when the task is clear — and leave
+   the roster alone.
 
 3. Report back exactly what the script printed: the `old → new` line, every ⚠
    warning verbatim (API-key billing, engine not logged in), and that the
