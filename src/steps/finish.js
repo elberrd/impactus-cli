@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { COMMUNITY } from '../config.js';
 import { has, run, runInherit } from '../lib/proc.js';
 import { piCodexReady } from '../lib/pi-auth.js';
+import { grokStatusLine, hasGrok } from '../lib/grok-auth.js';
 import { osKind } from '../lib/platform.js';
 import { CLAUDE_INSTALL_HINT } from './preflight.js';
 import { STACK_CATEGORIES, STACK_LATER } from '../stack-catalog.js';
@@ -205,6 +206,9 @@ export async function finish(ctx) {
   // required: the professional decides which subscriptions to use.
   const claudeReady = await has('claude');
   const codexReady = piCodexReady();
+  // Grok Build shows up only when it is on this machine: it is a third,
+  // optional subscription engine, never something the install asks for.
+  const grokLine = ctx.fiaInstalled && (await hasGrok()) ? await grokStatusLine() : null;
   ui.note(
     [
       claudeReady
@@ -215,6 +219,7 @@ export async function finish(ctx) {
           ? '✅ Codex (ChatGPT Plus/Pro, via Pi) — logged in.'
           : `○ Codex (ChatGPT Plus/Pro, via Pi) — login pending.\n   Log in:  run \`${agentCmd(ctx)}\` and type /login openai-codex.`
         : null,
+      grokLine,
       '',
       'Neither is mandatory. Agents give the best results with Claude and/or Codex,',
       ctx.fiaInstalled

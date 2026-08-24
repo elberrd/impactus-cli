@@ -27,12 +27,30 @@
 #                 `cursor-agent login`. Models: `cursor-agent --list-models`
 #                 (e.g. sonnet-4.5, gpt-5, composer-1…). Cursor's "effort"
 #                 lives in the model id itself (e.g. sonnet-4.5-thinking).
+#   grok        → Grok Build (`grok` CLI) — xAI subscription. Install:
+#                 curl -fsSL https://grok.com/install.sh | bash, then
+#                 `grok login` (OAuth; the token in ~/.grok/auth.json refreshes
+#                 itself — that login is what the FIA detects). Models:
+#                 grok-4.6 (default), grok-4.5 (`grok models` lists them).
+#                 `effort`: low | medium | high | xhigh (no max/ultracode).
+#                 NEVER set XAI_API_KEY for this engine — that turns the CLI
+#                 into per-token API billing; the FIA strips it from grok runs.
+#                 The first grok run trusts the project folder once
+#                 (~/.grok/trusted_folders.toml) so the FIA hooks apply —
+#                 untrusted, grok would skip them in silence.
 #
 # Effort/reasoning per engine:
 #   claude_code → `effort` field (low…ultracode)
+#   grok        → `effort` field (low|medium|high|xhigh)
 #   pi          → `thinking` field (minimal|low|medium|high) — on Codex this
 #                 is the model's reasoning effort
 #   cursor      → model-id variant (…-thinking)
+#
+# ONE RUN on another LLM (this file untouched): every FDA takes
+#   --llm "<model> [<level>]"          e.g. --llm "grok-4.6 high"   (every agent)
+#   --llm "<agent>[,<agent>]=<model> [<level>]"   e.g. --llm "builder=opus xhigh"
+# The choice is printed, traced (llm_override) and saved with the run, so
+# `--resume` keeps it. Inside Pi: `/task 12 --llm "grok 4.6 high"`.
 #
 # WARNING: Claude INSIDE Pi bills as per-token "extra usage" — to stay on the
 # Pro/Max plan, always use coding_agent: claude_code.
@@ -61,7 +79,12 @@
 #     model: fable
 #     effort: xhigh
 #
-#   - name: builder             # Grok 4.5 straight on xAI
+#   - name: builder             # Grok 4.6 on the xAI subscription (Grok Build)
+#     coding_agent: grok
+#     model: grok-4.6
+#     effort: high
+#
+#   - name: builder             # Grok 4.5 through the xAI API key (per token)
 #     coding_agent: pi
 #     model: xai/grok-4.5
 #

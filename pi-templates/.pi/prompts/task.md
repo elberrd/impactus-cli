@@ -1,10 +1,19 @@
 ---
-description: Execute ONE task via FDA (the next one, or the one I point to)
-argument-hint: "[number or description]"
+description: Execute ONE task via FDA (the next one, or the one I point to) — optionally on another LLM just for this run
+argument-hint: "[number or description] [--llm \"grok 4.6 high\" | \"builder=opus xhigh\"]"
 ---
 Read `.pi/skills/fia/SKILL.md` and the cookbook `.pi/skills/fia/cookbooks/harness_bridge.md`, and follow Step 2.
 
 Requested task: $@ (if empty, the next unblocked one from `ai-docs/todos/issues/`).
+
+**LLM for this run only.** If my request carries `--llm "…"` — or plain words
+like "on grok 4.6 high", "with opus xhigh", "builder on codex" — that is a
+run-scoped choice: append `--llm "<my words>"` to the FDA command in step 2
+(repeat the flag for several agents, e.g. `--llm "builder=grok-4.6 high"
+--llm "reviewer=opus"`). The script normalizes the spelling, clamps the level
+to the engine, refuses ambiguous ids with the fix, prints the `old → new`
+line (repeat it to me) and keeps it on `--resume`. NEVER edit
+`imp/fia.config.yaml` for this — a durable switch is `/llm`.
 
 1. Delegate to the `task-sequencer` to generate the brief in `ai-docs/actual-todo/`
    (it stops on the **theme gate** right after the greenfield foundation task —

@@ -23,9 +23,15 @@ import { realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { activeFdaLock } from './fda-lock.mjs';
-import { apiKeyProvider, checkEngines, engineIssue, providerOfModel } from '../modules/engines.mjs';
+import { GROK_EFFORTS, apiKeyProvider, checkEngines, engineIssue, grokModels } from '../modules/engines.mjs';
+import { levelField, resolveTarget } from '../modules/llm-target.mjs';
 import { dataDirOf } from '../modules/utils.mjs';
 import { CODING_AGENTS, EFFORTS, THINKING, loadRoster, saveRoster, validateRosterPatch } from './roster.mjs';
+
+// The target grammar ("fable", "grok 4.6", "cursor sonnet-4.5", "provider/id")
+// lives in modules/llm-target.mjs — shared with the run-scoped `--llm` flag of
+// every FDA, so both spellings can never drift. Re-exported for callers/tests.
+export { resolveTarget };
 
 const DEFAULT_CONFIG = process.env.FIA_CONFIG || 'imp/fia.config.yaml';
 
@@ -38,9 +44,6 @@ export const AGENT_PHASES = {
   reviewer: 'review, ui_check, ui_verify',
   documenter: 'document',
 };
-
-const CLAUDE_ALIASES = new Set(['sonnet', 'opus', 'haiku', 'fable']);
-const ENGINE_WORDS = { claude: 'claude_code', claude_code: 'claude_code', pi: 'pi', codex: 'pi', cursor: 'cursor' };
 
 /** Numbered display roster: loadRoster + phases, or { available: false }. */
 export function rosterView(configPath) {
@@ -62,47 +65,6 @@ export function pickAgent(agents, ref) {
     throw new Error(`no agent "${raw}" — pick a number or name: ${options}`);
   }
   return found;
-}
-
-/**
- * `{ coding_agent, model }` from what the engineer typed. Claude aliases and
- * `claude-*` ids imply claude_code; `provider/id` implies pi; anything else
- * needs an explicit engine (cursor ids look like bare words). Guards the two
- * billing traps: Claude through Pi (extra usage) is refused with the fix, and
- * a leading engine word ("cursor sonnet-4.5", "claude opus") is accepted.
- */
-export function resolveTarget(raw, { engine } = {}) {
-  let model = String(raw ?? '').trim();
-  if (engine !== undefined && !CODING_AGENTS.includes(engine)) {
-    throw new Error(`--engine must be one of ${CODING_AGENTS.join('|')}`);
-  }
-  const words = model.split(/\s+/);
-  if (!engine && words.length > 1 && ENGINE_WORDS[words[0].toLowerCase()]) {
-    engine = ENGINE_WORDS[words[0].toLowerCase()];
-    model = words.slice(1).join(' ');
-  }
-  if (!model) throw new Error('missing model — e.g. fable, opus, openai-codex/gpt-5.6-sol');
-  let coding_agent = engine;
-  if (!coding_agent) {
-    if (CLAUDE_ALIASES.has(model.toLowerCase()) || /^claude-/i.test(model)) coding_agent = 'claude_code';
-    else if (model.includes('/')) coding_agent = 'pi';
-    else {
-      throw new Error(
-        `cannot tell which engine runs "${model}" — name it: --engine claude_code|pi|cursor ` +
-          '(pi models are provider/id like openai-codex/gpt-5.6-sol; cursor ids come from `cursor-agent --list-models`)',
-      );
-    }
-  }
-  if (coding_agent === 'pi') {
-    if (!model.includes('/')) throw new Error(`pi models are provider/model-id (e.g. openai-codex/${model || 'gpt-5.6-sol'})`);
-    if (providerOfModel(model) === 'anthropic') {
-      throw new Error(
-        'Claude INSIDE Pi bills per token as "extra usage" — use the claude_code engine instead ' +
-          '(e.g. `set <agent> opus`): the official `claude` CLI runs on the Claude Pro/Max plan.',
-      );
-    }
-  }
-  return { coding_agent, model };
 }
 
 /**
@@ -146,8 +108,18 @@ export function applyChange({ root = process.cwd(), configPath, backupDir } = {}
       `"${to.model}" runs through the ${provider} API key — every token bills to that key, OUTSIDE your Claude/Codex subscription.`,
     );
   }
-  const issue = engineIssue(to, checkEngines());
+  const engines = checkEngines(process.env, { root });
+  const issue = engineIssue(to, engines);
   if (issue) warnings.push(`engine not ready on this machine: ${issue} — fix it before the next run (declared fallbacks still apply).`);
+  if (to.coding_agent === 'grok' && !issue && !engines.grok.trusted) {
+    warnings.push(
+      'grok has not trusted this project folder yet — it would skip the FIA hooks in silence. ' +
+        'The first run grants it automatically (or do it now: `grok --trust -p ok` in the project root).',
+    );
+  }
+  if (to.coding_agent === 'grok' && engines.grok.api_key_env) {
+    warnings.push('XAI_API_KEY is set in this shell — the FIA removes it from grok runs so they stay on the subscription; unset it to avoid surprises elsewhere.');
+  }
   return { name: entry.name, from: { coding_agent: entry.coding_agent, model: entry.model }, to, backup, warnings };
 }
 
@@ -157,12 +129,11 @@ const tty = () => process.stdout.isTTY;
 const dim = (s) => (tty() ? `\x1b[2m${s}\x1b[22m` : s);
 const bold = (s) => (tty() ? `\x1b[1m${s}\x1b[22m` : s);
 
-// claude_code exposes `effort`, pi exposes `thinking`; cursor's level lives in
-// the model id itself (…-thinking), so a stale field is never shown for it.
+// claude_code and grok expose `effort`, pi exposes `thinking`; cursor's level
+// lives in the model id itself (…-thinking), so a stale field is never shown.
 const levelOf = (a) => {
-  if (a.coding_agent === 'claude_code') return a.effort ? `effort ${a.effort}` : '';
-  if (a.coding_agent === 'pi') return a.thinking ? `thinking ${a.thinking}` : '';
-  return '';
+  const field = levelField(a.coding_agent);
+  return field && a[field] ? `${field} ${a[field]}` : '';
 };
 
 export function renderList(view, engines) {
@@ -178,8 +149,9 @@ export function renderList(view, engines) {
   }
   lines.push('');
   lines.push(dim(`Defaults (inherited when an agent omits a field): ${view.defaults.coding_agent} · ${view.defaults.model}`));
-  lines.push(dim('Change one: imp llm set <number|name> <model>   e.g. `imp llm set 1 fable` · `imp llm set builder openai-codex/gpt-5.6`'));
-  lines.push(dim('Models: claude aliases sonnet|opus|haiku|fable · pi = provider/id · cursor ids need --engine cursor. Fallbacks/chains: /agents.'));
+  lines.push(dim('Change one: imp llm set <number|name> <model>   e.g. `imp llm set 1 fable` · `imp llm set builder grok-4.6 --effort high`'));
+  lines.push(dim('Models: claude aliases sonnet|opus|haiku|fable · grok-4.6|grok-4.5 (Grok Build) · pi = provider/id · cursor ids need --engine cursor. Fallbacks/chains: /agents.'));
+  lines.push(dim('One run only (roster untouched): node imp/fda_*.mjs … --llm "grok-4.6 high"  ·  --llm "builder=opus xhigh"'));
   return lines.join('\n');
 }
 
@@ -196,9 +168,11 @@ function printResult(result) {
 const USAGE = `Usage:
   imp llm                      list the agents (interactive on a TTY)
   imp llm --json               machine-readable roster + engine status
-  imp llm set <n|name> <model> [--engine claude_code|pi|cursor]
-                               [--effort ${EFFORTS.join('|')}]
+  imp llm set <n|name> <model> [--engine ${CODING_AGENTS.join('|')}]
+                               [--effort ${EFFORTS.join('|')}]   (grok: ${GROK_EFFORTS.join('|')})
                                [--thinking ${THINKING.join('|')}]
+Models: sonnet|opus|haiku|fable (claude) · grok-4.6|grok-4.5 (grok) · provider/id (pi) · picker id + --engine cursor
+One run only, roster untouched:  node imp/fda_*.mjs "<prompt>" --llm "grok-4.6 high"   ·   --llm "builder=opus xhigh"
 Also: npm run llm · /llm inside Pi · visual editor with fallbacks: /agents`;
 
 function parseArgv(argv) {
@@ -257,6 +231,8 @@ export async function runCli(argv, { root = process.cwd() } = {}) {
         agents: view.agents.map((a) => ({ ...a, engine_issue: engineIssue(a, engines) })),
         engines,
         efforts: EFFORTS,
+        grok_efforts: GROK_EFFORTS,
+        grok_models: engines.grok?.installed ? grokModels() : null,
         thinking_levels: THINKING,
         coding_agents: CODING_AGENTS,
       }),
@@ -284,7 +260,7 @@ export async function runCli(argv, { root = process.cwd() } = {}) {
       }
       const target = (
         await rl.question(
-          `New LLM for ${entry.name} (current: ${entry.coding_agent} · ${entry.model}) — e.g. fable, opus, openai-codex/gpt-5.6-sol, "cursor <id>": `,
+          `New LLM for ${entry.name} (current: ${entry.coding_agent} · ${entry.model}) — e.g. fable, opus, grok-4.6, openai-codex/gpt-5.6-sol, "cursor <id>": `,
         )
       ).trim();
       if (!target) continue;

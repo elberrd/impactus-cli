@@ -78,7 +78,43 @@ export function activeFdaLock(root, dataDir = null) {
   }
 }
 
-const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+// Tool names across the two hook dialects this gate serves: Claude Code
+// (Write/Edit/…/Bash) and Grok Build, which reads .claude/settings.json for
+// compatibility but sends its OWN tool ids (search_replace, run_terminal_command).
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'search_replace', 'write_file', 'write', 'edit']);
+const SHELL_TOOLS = new Set(['Bash', 'run_terminal_command', 'run_terminal_cmd']);
+
+/**
+ * `{ name, input }` of the tool call in a PreToolUse payload, whichever dialect
+ * sent it: Claude Code uses snake_case (`tool_name`/`tool_input`), Grok Build
+ * camelCase (`toolName`/`toolInput`). Reading only one of them makes the
+ * other engine's hook a silent no-op — the failure mode a guard must never have.
+ */
+export function hookTool(hook) {
+  return {
+    name: String(hook?.tool_name ?? hook?.toolName ?? ''),
+    input: hook?.tool_input ?? hook?.toolInput ?? {},
+  };
+}
+
+/**
+ * Deny in BOTH dialects at once: exit 2 + the reason on stderr (Claude Code
+ * feeds stderr back to the model on exit 2; grok takes exit 2 as deny too)
+ * AND a stdout JSON carrying grok's `decision`/`reason` plus Claude's
+ * `hookSpecificOutput` block. Claude Code ignores stdout on exit 2, grok
+ * honors the JSON deny regardless of exit code — so one object serves both.
+ */
+export function denyOutput(reason) {
+  console.error(reason);
+  console.log(
+    JSON.stringify({
+      decision: 'deny',
+      reason,
+      hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason },
+    }),
+  );
+  return 2;
+}
 
 // Bash write-context heuristics, shared shape with the Pi fia-guard extension:
 // a command only blocks when it plausibly mutates files inside the repo.
@@ -120,16 +156,15 @@ export function bashWritesInRepo(root, command) {
   return tokens.some((t) => /[/.]/.test(t) && insideRoot(root, t));
 }
 
-/** PreToolUse verdict for a Claude hook payload → { block, reason? }. */
+/** PreToolUse verdict for a Claude Code or Grok Build hook payload → { block, reason? }. */
 export function gateDecision(hook, { root, lock }) {
-  const tool = hook?.tool_name;
-  const input = hook?.tool_input || {};
+  const { name: tool, input } = hookTool(hook);
   if (WRITE_TOOLS.has(tool)) {
-    const target = input.file_path || input.notebook_path || '';
+    const target = input.file_path || input.notebook_path || input.target_file || input.path || '';
     if (insideRoot(root, target)) return { block: true, reason: gateReason(lock, target) };
     return { block: false };
   }
-  if (tool === 'Bash' && bashWritesInRepo(root, String(input.command || ''))) {
+  if (SHELL_TOOLS.has(tool) && bashWritesInRepo(root, String(input.command || ''))) {
     return { block: true, reason: gateReason(lock, 'this command') };
   }
   return { block: false };
@@ -199,10 +234,7 @@ export async function runCli(argv, { root = process.cwd(), env = process.env, in
       return 0; // unreadable hook payload → fail open
     }
     const verdict = gateDecision(hook, { root: hook?.cwd || root, lock });
-    if (verdict.block) {
-      console.error(verdict.reason);
-      return 2;
-    }
+    if (verdict.block) return denyOutput(verdict.reason);
     return 0;
   }
   return 0;

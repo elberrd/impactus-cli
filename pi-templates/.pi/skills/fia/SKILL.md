@@ -35,8 +35,8 @@ Short commands (prompt templates in `.pi/prompts/`) are the student entry points
 | `/grill [target]` | stress-tests the PRD, records decisions | decision-log |
 | `/prd [focus]` | quick reviewer opinion on the PRD | — |
 | `/map` | PRD → map.yaml + screens + tasks + milestones | harness_bridge (Step 1) |
-| `/task [n]` | runs ONE task via FDA | harness_bridge (Step 2) |
-| `/goal` | all tasks until done | harness_bridge (Step 3) |
+| `/task [n] [--llm "<model> [level]"]` | runs ONE task via FDA; `--llm` (or "on grok 4.6 high" in the request) runs THAT task on another LLM — pass it to the FDA as `--llm "…"`, never edit the roster | harness_bridge (Step 2) · update_roster (`--llm`) |
+| `/goal [--llm "…"]` | all tasks until done (`--llm` applies to every FDA the loop dispatches) | harness_bridge (Step 3) |
 | `/feature "what you want"` | new feature in an existing system — delta interview → delta spec + new issues | harness_bridge (Step 4) |
 | `/bug "the symptom"` | records the defect, `fda_bug` proves a valid RED, then fixes it | harness_bridge (Step 2) |
 | `/quick "small change"` | triage — simple stays simple: `fda_quick` + quick-log entry; complex routes to /feature or /bug | harness_bridge (Step 2) |
@@ -50,7 +50,7 @@ Short commands (prompt templates in `.pi/prompts/`) are the student entry points
 | `/design [images]` | layout redesign from references, inside the design system | design |
 | `/example [URL or slug]` | register an external reference (repo, code, docs, design) on the examples shelf | examples |
 | `/agents` | visual roster editor — engines, models, fallbacks (viewer "Agents" tab) | update_roster |
-| `/llm ["1 → fable"?]` | numbered list of the FDA agents + the LLM each runs on; switch by number or name via `imp/scripts/fia-llm.mjs set` (never edit the YAML directly). Also `imp llm` in a terminal | update_roster |
+| `/llm ["1 → fable"?]` | numbered list of the FDA agents + the LLM each runs on; switch by number or name via `imp/scripts/fia-llm.mjs set` (never edit the YAML directly). Engines: claude_code · pi (Codex/any provider) · cursor · grok (Grok Build, `grok-4.6`). Also `imp llm` in a terminal | update_roster |
 | `/defer [n \| resume n]` | postpone a task that cannot proceed now (missing API keys, a pending decision): status → deferred + its sealed holdout probes quarantined via `imp/scripts/task-defer.mjs` (rename only, reversible — NEVER `mv` in `imp/data/holdout/` by hand); `resume` brings it back. Also `imp defer` in a terminal | run_fda |
 | `/onboarding [focus?] [--report-only]` | first command on an existing system — chains /absorb → /stack → /kit in one guided pass (resumable via its decision-log rail; `--report-only` defers the kit decisions), ends ready for /idea or /feature | decision-log |
 | `/absorb [focus]` | existing project → as-built PRD + map + conventions + stack manifest + component registry + the maintained `ai-docs/wiki/` (stamped, then checked by `npm run wiki:check`) | — |

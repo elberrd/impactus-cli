@@ -696,10 +696,11 @@ function renderTabVisao(ph){
   if(ph.kind==='agent' && r){
     var engine = r.coding_agent==='claude_code' ? '⌘ Claude Code (subscription)'
       : r.coding_agent==='cursor' ? '▮ Cursor (subscription)'
+      : r.coding_agent==='grok' ? '✦ Grok Build (xAI subscription)'
       : 'π Pi — '+esc(String(r.model||'').split('/')[0]||'codex');
     html += frow('Engine', engine);
     html += frow('Model', '<span class="fv mono">'+esc(r.model)+'</span>');
-    html += frow(r.coding_agent==='claude_code' ? 'Effort' : 'Thinking', esc(r.effort || r.thinking || '—'));
+    html += frow(agIsEffortEngine(r.coding_agent) ? 'Effort' : 'Thinking', esc(r.effort || r.thinking || '—'));
     if(r.purpose) html += frow('Role', esc(r.purpose));
     if(r.tools && r.tools.length) html += frow('Tools',
       '<div class="toolchips">'+r.tools.map(function(t){ return '<span class="tchip">'+esc(t)+'</span>'; }).join('')+'</div>');
@@ -1732,9 +1733,20 @@ function renderPlanDocView(box){
 
 // ── Agents view ──────────────────────────────────────────────────────────────
 var AG_EFFORTS = ['low','medium','high','xhigh','max','ultracode'];
+var AG_GROK_EFFORTS = ['low','medium','high','xhigh'];
 var AG_THINKING = ['minimal','low','medium','high'];
-var AG_DEFAULT_MODEL = { claude_code:'opus', pi:'openai-codex/gpt-5.6-sol', cursor:'sonnet-4.5-thinking' };
-var AG_DEFAULT_LEVEL = { claude_code:'high', pi:'medium', cursor:'' };
+var AG_ENGINES = ['claude_code','pi','cursor','grok'];
+var AG_DEFAULT_MODEL = { claude_code:'opus', pi:'openai-codex/gpt-5.6-sol', cursor:'sonnet-4.5-thinking', grok:'grok-4.6' };
+var AG_DEFAULT_LEVEL = { claude_code:'high', pi:'medium', cursor:'', grok:'high' };
+// claude_code and grok carry their reasoning level in "effort"; pi in
+// "thinking"; cursor in the model id itself.
+function agIsEffortEngine(eng){ return eng === 'claude_code' || eng === 'grok'; }
+function agLevelStored(x, withDefault){
+  if(agIsEffortEngine(x.coding_agent)) return x.effort || (withDefault ? AG_DEFAULT_LEVEL[x.coding_agent] : '');
+  if(x.coding_agent === 'pi') return x.thinking || (withDefault ? 'medium' : '');
+  return '';
+}
+function agLevelsFor(eng){ return eng === 'claude_code' ? AG_EFFORTS : eng === 'grok' ? AG_GROK_EFFORTS : AG_THINKING; }
 var FDA_MAP = [
   { fda:'fda_sdlc', via:'/task · /goal · /bug', phases:[['request',''],['plan','planner'],['build','builder'],['test',''],['review','reviewer'],['commit',''],['document','documenter']] },
   { fda:'fda_plan_build_test', via:'build with test/fix loop', phases:[['request',''],['plan','planner'],['build','builder'],['test_n',''],['fix_n','builder'],['commit','']] },
@@ -1758,10 +1770,9 @@ function agInitEdits(){
     if(S.agents.edits[a.name]) return;
     S.agents.edits[a.name] = {
       coding_agent: a.coding_agent, model: a.model,
-      level: a.coding_agent === 'claude_code' ? (a.effort || 'high') : a.coding_agent === 'pi' ? (a.thinking || 'medium') : '',
+      level: agLevelStored(a, true),
       fallbacks: (a.fallbacks || []).map(function(fb){
-        return { coding_agent: fb.coding_agent, model: fb.model,
-                 level: fb.coding_agent === 'claude_code' ? (fb.effort || '') : fb.coding_agent === 'pi' ? (fb.thinking || '') : '' };
+        return { coding_agent: fb.coding_agent, model: fb.model, level: agLevelStored(fb, false) };
       }),
     };
   });
@@ -1772,7 +1783,7 @@ function agDirty(name){
   var out = [];
   if(e.coding_agent !== a.coding_agent) out.push('engine ' + a.coding_agent + ' → ' + e.coding_agent);
   if(e.model !== a.model) out.push('model ' + a.model + ' → ' + e.model);
-  var storedLevel = a.coding_agent === 'claude_code' ? (a.effort || 'high') : a.coding_agent === 'pi' ? (a.thinking || 'medium') : '';
+  var storedLevel = agLevelStored(a, true);
   if(e.coding_agent === a.coding_agent && e.level !== storedLevel) out.push('reasoning ' + storedLevel + ' → ' + e.level);
   var sf = JSON.stringify((a.fallbacks || []).map(function(fb){ return [fb.coding_agent, fb.model, fb.effort || fb.thinking || '']; }));
   var ef = JSON.stringify((e.fallbacks || []).map(function(fb){ return [fb.coding_agent, fb.model, fb.level || '']; }));
@@ -1806,6 +1817,14 @@ function agModelGroups(engine){
     return [{ g: E.cursorModels ? 'cursor-agent --list-models' : 'examples — confirm with cursor-agent --list-models',
       items: ms.map(function(m){ return { id:m, locked:!installed, hint: installed ? '' : 'install cursor-agent' }; }) }];
   }
+  if(engine === 'grok'){
+    var gk = eng.grok || {};
+    var gLocked = !(gk.installed && gk.logged);
+    var gHint = !gk.installed ? 'install grok' : !gk.logged ? 'grok login' : '';
+    var gm = E.grokModels && E.grokModels.length ? E.grokModels : [{ id:'grok-4.6' }, { id:'grok-4.5' }];
+    return [{ g: E.grokModels ? 'Grok Build (xAI subscription) — from grok models' : 'Grok Build (xAI subscription)',
+      items: gm.map(function(m){ return { id:m.id, locked:gLocked, hint:gHint }; }) }];
+  }
   // pi: curated ids + every pi model already present in the config, grouped by provider
   var ids = ['openai-codex/gpt-5.6-sol','openai-codex/gpt-5.6','github-copilot/gpt-5.6','openrouter/moonshotai/kimi-k3','xai/grok-4.5'];
   var d = S.agents.data;
@@ -1829,6 +1848,10 @@ function agEngineIssueFor(edit){
   var eng = E.engines || {};
   if(edit.coding_agent === 'claude_code' && eng.claude_code && !eng.claude_code.installed) return 'claude CLI is not installed';
   if(edit.coding_agent === 'cursor' && eng.cursor && !eng.cursor.installed) return 'cursor-agent is not installed';
+  if(edit.coding_agent === 'grok' && eng.grok){
+    if(!eng.grok.installed) return 'grok (Grok Build) is not installed — curl -fsSL https://grok.com/install.sh | bash';
+    if(!eng.grok.logged) return 'grok is not logged in — run "grok login" (subscription; never XAI_API_KEY)';
+  }
   if(edit.coding_agent === 'pi'){
     if(eng.pi && !eng.pi.installed) return 'pi is not installed';
     var i = edit.model.indexOf('/');
@@ -1886,6 +1909,18 @@ function renderAgentsSidebar(){
       ? '<li><span>✓</span><span>installed · login: <b>cursor-agent status</b></span></li>'
       : '<li class="miss"><span>✗</span><span>not found on PATH</span></li>') +
     '</ul>' + (cu.installed ? '' : '<div class="fixhint">curl https://cursor.com/install -fsS | bash</div>') + '</div>';
+  var gk = eng.grok || {};
+  var gkDot = gk.installed ? (gk.logged ? 'ok' : 'err') : 'err';
+  var gkModels = (E.grokModels || []).map(function(m){ return m.id; }).join(' · ') || 'grok-4.6 · grok-4.5';
+  html += '<div class="aeng"><div class="top"><span class="adot ' + gkDot + '"></span><span class="nm">Grok Build<code>grok</code></span></div><ul>' +
+    (gk.installed
+      ? '<li' + (gk.logged ? '' : ' class="miss"') + '><span>' + (gk.logged ? '✓' : '✗') + '</span><span>' +
+          (gk.logged ? 'installed · logged in (xAI subscription)' : 'installed · not logged in') + '</span></li>' +
+        '<li><span>·</span><span>models: <b>' + esc(gkModels) + '</b> · effort low…xhigh</span></li>' +
+        (gk.trusted ? '' : '<li><span>·</span><span>project trust: granted automatically at the first grok run (hooks)</span></li>') +
+        (gk.api_key_env ? '<li class="miss"><span>!</span><span>XAI_API_KEY is set — the FIA removes it from grok runs (subscription only)</span></li>' : '')
+      : '<li class="miss"><span>✗</span><span>not found on PATH</span></li>') +
+    '</ul>' + (!gk.installed ? '<div class="fixhint">curl -fsSL https://grok.com/install.sh | bash &nbsp;→&nbsp; grok login</div>' : !gk.logged ? '<div class="fixhint">grok login</div>' : '') + '</div>';
   html += '<span class="arefresh" id="aengrefresh">↻ check again</span>';
   html += '</div>';
   $('list').innerHTML = html;
@@ -1908,14 +1943,14 @@ function agPickerHtml(name, slot, edit){
       });
     });
     html += '<div class="g">custom</div><div class="custom"><input data-mcustom="' + esc(id) + '" placeholder="' +
-      (edit.coding_agent === 'pi' ? 'provider/model-id' : 'model id') + '" /><span class="okbtn" data-mcustomok="' + esc(id) + '">set</span></div>';
+      (edit.coding_agent === 'pi' ? 'provider/model-id' : edit.coding_agent === 'grok' ? 'grok-<version>' : 'model id') + '" /><span class="okbtn" data-mcustomok="' + esc(id) + '">set</span></div>';
     html += '</div>';
   }
   return html + '</div>';
 }
 function agSegHtml(name, slot, edit){
   var id = name + '_' + slot;
-  return '<div class="aseg">' + ['claude_code','pi','cursor'].map(function(engv){
+  return '<div class="aseg">' + AG_ENGINES.map(function(engv){
     var label = engv === 'claude_code' ? 'claude' : engv;
     return '<span data-seg="' + esc(id) + '" data-eng="' + engv + '"' + (edit.coding_agent === engv ? ' class="sel"' : '') + '>' + label + '</span>';
   }).join('') + '</div>';
@@ -1923,7 +1958,7 @@ function agSegHtml(name, slot, edit){
 function agLevelHtml(name, slot, edit){
   var id = name + '_' + slot;
   if(edit.coding_agent === 'cursor') return '<span class="apillnote">on Cursor, reasoning lives in the model id (…-thinking)</span>';
-  var levels = edit.coding_agent === 'claude_code' ? AG_EFFORTS : AG_THINKING;
+  var levels = agLevelsFor(edit.coding_agent);
   return '<div class="apills">' + levels.map(function(lv){
     return '<span data-lvl="' + esc(id) + '" data-v="' + lv + '"' + (edit.level === lv ? ' class="sel"' : '') + '>' + lv + '</span>';
   }).join('') + '</div>';
@@ -2116,11 +2151,11 @@ function agentsSave(){
     var e = S.agents.edits[n];
     return {
       name: n, coding_agent: e.coding_agent, model: e.model,
-      effort: e.coding_agent === 'claude_code' ? (e.level || null) : null,
+      effort: agIsEffortEngine(e.coding_agent) ? (e.level || null) : null,
       thinking: e.coding_agent === 'pi' ? (e.level || null) : null,
       fallbacks: e.fallbacks.map(function(fb){
         var out = { coding_agent: fb.coding_agent, model: fb.model };
-        if(fb.coding_agent === 'claude_code' && fb.level) out.effort = fb.level;
+        if(agIsEffortEngine(fb.coding_agent) && fb.level) out.effort = fb.level;
         if(fb.coding_agent === 'pi' && fb.level) out.thinking = fb.level;
         return out;
       }),

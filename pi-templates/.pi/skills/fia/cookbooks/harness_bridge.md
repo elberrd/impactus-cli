@@ -116,6 +116,9 @@ After the artifacts land, show them to the engineer: `npm run plan -- --detach` 
 node imp/fda_plan_build_test.mjs ai-docs/actual-todo/<brief>.md
 # brief already autocontained (skip planner, save ~1-2.5M tokens):
 node imp/fda_build_test.mjs ai-docs/actual-todo/<brief>.md
+# the engineer asked for another LLM for THIS task only ("on grok 4.6 high",
+# `/task 12 --llm "builder=opus xhigh"`): pass it through — never edit the roster
+node imp/fda_plan_build_test.mjs ai-docs/actual-todo/<brief>.md --llm "grok 4.6 high"
 # bigger/riskier: plan (auto-skipped on self-contained briefs) → build →
 # test + fix rounds → review (green suites only) → commit. Docs default to one
 # fda_document per MILESTONE (`sdlc:` block in imp/fia.config.yaml).

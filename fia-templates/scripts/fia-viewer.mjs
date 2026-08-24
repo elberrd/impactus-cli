@@ -28,7 +28,7 @@ import { parse as parseYaml } from 'yaml';
 import { PAGE } from './fia-viewer-page.mjs';
 import { piSessionsDirFor, listPiSessions, readPiSession, readPiRun } from './pi-sessions.mjs';
 import { readPlanOverview, readPlanScreens, readPlanTasks, readPlanDesign, readPlanDoc } from './plan-docs.mjs';
-import { checkEngines, PI_ENV_KEYS, PI_OAUTH_PROVIDERS } from '../modules/engines.mjs';
+import { checkEngines, grokModels, PI_ENV_KEYS, PI_OAUTH_PROVIDERS } from '../modules/engines.mjs';
 import { saveRoster, validateRosterPatch } from './roster.mjs';
 
 const DEFAULT_DB = process.env.FIA_DB || 'imp/data/fia.db';
@@ -392,12 +392,14 @@ export function startViewer({
         if (!doc) return json(res, { error: 'bad path' }, 400);
         json(res, doc);
       } else if (url.pathname === '/api/engines') {
-        const engines = checkEngines();
+        const engines = checkEngines(process.env, { root: projectRoot });
         json(res, {
           engines,
           piEnvKeys: PI_ENV_KEYS,
           piOauthProviders: PI_OAUTH_PROVIDERS,
           cursorModels: engines.cursor.installed ? await cursorModels() : null,
+          // grok's own models cache (ids + advertised reasoning levels).
+          grokModels: engines.grok?.installed ? grokModels() : null,
           running: runningCount(),
           now: new Date().toISOString(),
         });

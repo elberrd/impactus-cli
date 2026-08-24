@@ -770,6 +770,12 @@ function AgentsTab({ roster, usage, engines, width }) {
               { key: 'u', color: engines.cursor?.installed ? 'green' : 'red' },
               `cursor ${engines.cursor?.installed ? '✓' : '✗'}`,
             ),
+            h(Text, { key: 's3', color: 'gray' }, ' · '),
+            h(
+              Text,
+              { key: 'g', color: engines.grok?.installed && engines.grok?.logged ? 'green' : engines.grok?.installed ? 'yellow' : 'red' },
+              `grok ${engines.grok?.installed ? (engines.grok?.logged ? '✓' : '✓ (login)') : '✗'}`,
+            ),
           ]
         : 'checking…',
     ),

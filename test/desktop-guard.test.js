@@ -149,3 +149,26 @@ test('harness Cursor shim: deny on control, allow-open without the runtime', { s
   cpSync(CURSOR_SHIM, join(bare, '.cursor', 'hooks', 'desktop-guard-cursor.mjs'));
   assert.deepEqual(run(bare, { command: 'orca computer list-windows' }), { permission: 'allow' });
 });
+
+// ── Grok Build dialect: camelCase payload + grok shell tool id, bilingual deny ─
+
+test('gateDecision: grok payload (toolName run_terminal_command / toolInput.command) is guarded too', () => {
+  assert.equal(gateDecision({ toolName: 'run_terminal_command', toolInput: { command: INCIDENT } }).block, true);
+  assert.equal(gateDecision({ toolName: 'run_terminal_command', toolInput: { command: 'npm test' } }).block, false);
+  assert.equal(gateDecision({ toolName: 'search_replace', toolInput: { file_path: 'x' } }).block, false);
+});
+
+test('gate CLI: the deny is bilingual — exit 2 + stderr for Claude Code, stdout JSON decision for grok', () => {
+  const blocked = runScript(['gate'], {
+    input: JSON.stringify({ hookEventName: 'pre_tool_use', toolName: 'run_terminal_command', toolInput: { command: INCIDENT } }),
+  });
+  assert.equal(blocked.status, 2);
+  assert.match(blocked.stderr, /Blocked/);
+  const out = JSON.parse(blocked.stdout.trim());
+  assert.equal(out.decision, 'deny');
+  assert.match(out.reason, /Playwright/);
+  assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
+  const allowed = runScript(['gate'], { input: JSON.stringify({ toolName: 'run_terminal_command', toolInput: { command: 'git status' } }) });
+  assert.equal(allowed.status, 0);
+  assert.equal(allowed.stdout.trim(), '');
+});

@@ -39,6 +39,7 @@ import {
   PI_PACKAGES,
 } from '../lib/pi-auth.js';
 import { CLAUDE_INSTALL_HINT } from './preflight.js';
+import { grokStatusLine } from '../lib/grok-auth.js';
 import { collectFindings } from './verify.js';
 import { classifyHarnessState, readHarnessManifest } from '../lib/harness-manifest.js';
 import { isRuntimeCode, missingRuntimeCode, runtimeHint } from '../lib/runtime-health.js';
@@ -105,6 +106,8 @@ async function enginesSection() {
       ? ok('Cursor CLI (cursor-agent) — installed (Cursor subscription).')
       : info('Cursor CLI (cursor-agent) — not installed (optional; see https://cursor.com/cli).'),
   );
+  const grokLine = await grokStatusLine({ okMark: '', pendingMark: '' });
+  rows.push(grokLine.startsWith(' Grok Build (xAI subscription) — installed and logged in') ? ok(grokLine.trim()) : info(grokLine.trim()));
   rows.push(info('None is mandatory — doctor only reports; which subscriptions to use is your call.'));
   return { title: 'Engines (subscriptions)', rows };
 }

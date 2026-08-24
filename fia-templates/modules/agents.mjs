@@ -4,10 +4,11 @@ import { parse as parseYaml } from 'yaml';
 import * as agentPi from './agent-pi.mjs';
 import * as agentClaude from './agent-claude.mjs';
 import * as agentCursor from './agent-cursor.mjs';
+import * as agentGrok from './agent-grok.mjs';
 import * as prompts from './prompts.mjs';
 import * as permissions from './permissions.mjs';
 import * as continuation from './continuation.mjs';
-import { checkEngines, engineIssue } from './engines.mjs';
+import { ENGINE_NAMES, checkEngines, engineIssue } from './engines.mjs';
 import { runChangedPaths } from './git-helper.mjs';
 import { StopCondition } from './stop.mjs';
 import { OUTCOMES } from './outcome.mjs';
@@ -40,6 +41,7 @@ export const engineAdapters = {
   claude_code: agentClaude.runClaude,
   cursor: agentCursor.runCursor,
   pi: agentPi.runPi,
+  grok: agentGrok.runGrok,
 };
 
 export function loadConfig(path = 'imp/fia.config.yaml') {
@@ -105,17 +107,12 @@ export function validate(cfg, required) {
   for (const name of required) {
     try {
       const agent = resolve(cfg, name);
-      if (!['pi', 'claude_code', 'cursor'].includes(agent.coding_agent)) {
-        problems.push(`agent ${name}: coding_agent ${agent.coding_agent} not supported`);
+      if (!ENGINE_NAMES.includes(agent.coding_agent)) {
+        problems.push(`agent ${name}: coding_agent ${agent.coding_agent} not supported (${ENGINE_NAMES.join('|')})`);
       }
       for (const [i, fb] of (Array.isArray(agent.fallbacks) ? agent.fallbacks : []).entries()) {
-        if (
-          !fb ||
-          !['pi', 'claude_code', 'cursor'].includes(fb.coding_agent) ||
-          typeof fb.model !== 'string' ||
-          !fb.model.trim()
-        ) {
-          problems.push(`agent ${name}: fallbacks[${i}] needs coding_agent (pi|claude_code|cursor) and a model`);
+        if (!fb || !ENGINE_NAMES.includes(fb.coding_agent) || typeof fb.model !== 'string' || !fb.model.trim()) {
+          problems.push(`agent ${name}: fallbacks[${i}] needs coding_agent (${ENGINE_NAMES.join('|')}) and a model`);
         }
       }
       if (agent.phase_overrides !== undefined) {
@@ -219,6 +216,28 @@ async function send(run, phase, agent, promptText, systemText, sessionMeta) {
     );
   }
 
+  if (agent.coding_agent === 'grok') {
+    return engineAdapters.grok(
+      {
+        prompt: promptText,
+        systemPrompt: systemText,
+        model: agent.model,
+        effort: agent.effort,
+        thinking: agent.thinking,
+        sessionId: sessionMeta.sessionId,
+        limits: sessionMeta.limits,
+        rawOutputPath,
+        cwd: run.repoRoot,
+        env: run.env,
+      },
+      {
+        onEvent,
+        onSpawn: (pid) => run.tracer.processStart(run.fdaId, 'agent', agent.name, pid, `grok ${agent.name}`),
+        onExit: (pid) => run.tracer.processEnd(run.fdaId, pid),
+      },
+    );
+  }
+
   return engineAdapters.pi(
     {
       prompt: promptText,
@@ -285,12 +304,16 @@ function engineHint(text, agent) {
   const kind = continuation.classifyEngineFailure(text);
   if (kind === 'login') {
     const cmd =
-      { claude_code: '`claude`', pi: '`pi` and then /login', cursor: '`cursor-agent login`' }[agent.coding_agent] ||
-      agent.coding_agent;
+      { claude_code: '`claude`', pi: '`pi` and then /login', cursor: '`cursor-agent login`', grok: '`grok login`' }[
+        agent.coding_agent
+      ] || agent.coding_agent;
     return `This looks like a login problem. Open a terminal, run ${cmd}, sign in again, then re-run this FDA.`;
   }
   if (kind === 'limit') {
     return 'This looks like your subscription plan limit. Limits reset on their own — wait a while and re-run this FDA. No extra payment is needed.';
+  }
+  if (/unknown model id|unknown model|model .* not found|invalid model/i.test(String(text || ''))) {
+    return `The model id "${agent.model}" is not one this engine knows — retrying cannot help. Fix the roster (imp llm set ${agent.name} <model>) or the --llm value, then re-run this FDA.`;
   }
   return `The ${agent.coding_agent} CLI exited with an error before answering. Re-run this FDA; if it persists, run the CLI by hand to see the problem.`;
 }

@@ -10,15 +10,36 @@ student answers "1 → fable" (or "builder → openai-codex/gpt-5.6") and the
 change is applied by `node imp/scripts/fia-llm.mjs set <n|name> <model>` —
 the SAME write path as the Agents tab: comments preserved, backup under
 `imp/data/backups/`, atomic write, refused while an FDA run is live. Claude
-aliases route to `claude_code`, `provider/id` routes to `pi` (`anthropic/*`
-is refused — extra usage), cursor ids need `--engine cursor`. Pi must never
-edit `imp/fia.config.yaml` directly — the script owns the write.
+aliases route to `claude_code`, `grok-<version>` ids (or "grok 4.6") route to
+`grok`, `provider/id` routes to `pi` (`anthropic/*` is refused — extra usage),
+cursor ids need `--engine cursor`. Pi must never edit `imp/fia.config.yaml`
+directly — the script owns the write.
+
+## One run only — `--llm` (the roster stays as it is)
+
+When the engineer wants a DIFFERENT LLM for just this task ("run this one on
+grok 4.6 high", "do it with opus xhigh", `/task 12 --llm "grok 4.6 high"`),
+do NOT touch the roster: pass the words through to the FDA as
+`--llm "<what they said>"` — every `node imp/fda_*.mjs` accepts it, repeatable:
+
+```bash
+node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md --llm "grok 4.6 high"        # every agent of this run
+node imp/fda_sdlc.mjs ai-docs/actual-todo/<brief>.md --llm "builder=opus xhigh"   # only the builder
+node imp/fda_quick.mjs "rename the button" --llm "reviewer,scout=openai-codex/gpt-5.6-sol"
+```
+
+Grammar: `[<agent>[,<agent>]=]<model>[ <level>]` — the script normalizes
+spellings (`grok 4.6` → `grok-4.6`, `max` on grok → `xhigh`), refuses
+ambiguous ids with the exact fix, prints every switch at run start, traces it
+(`llm_override`) and saves it with the run so `--resume` keeps the same LLM.
+Report the printed `old → new` line to the engineer. Never "remember" the
+choice by editing the YAML — a durable change is `/llm`, not `--llm`.
 
 ## The visual way — /agents (recommended for fallbacks and overviews)
 
 `/agents` (inside `pi`) or `npm run agents` opens the FIA viewer's "Agents" tab
 (http://127.0.0.1:4600#agents). There the student sees the engine login status
-(claude/pi/cursor), changes each FDA agent's engine, model and reasoning, and
+(claude/pi/cursor/grok), changes each FDA agent's engine, model and reasoning, and
 edits an optional `fallbacks:` chain — no YAML by hand. Save writes
 `imp/fia.config.yaml` preserving comments (a backup is kept; saving is locked
 while an FDA runs). Recommend it first; the manual edit below covers the same
@@ -33,8 +54,9 @@ FDAs never name models — they name agents. The engine/model pair lives ONLY in
 | `claude_code` | official `claude` CLI | `claude` once (Pro/Max plan limits) | alias `sonnet`/`opus`/`haiku`/`fable` or full name; `effort: low\|medium\|high\|xhigh\|max\|ultracode` |
 | `pi` | Pi headless | subscriptions: `pi` → `/login openai-codex` or `github-copilot`; API keys via env | `provider/model-id`; `thinking: minimal\|low\|medium\|high` (Codex reasoning effort) |
 | `cursor` | Cursor Agent CLI | `cursor-agent login` (Cursor subscription) | id from `cursor-agent --list-models`; effort variants live in the id (e.g. `sonnet-4.5-thinking`) |
+| `grok` | Grok Build (`grok` CLI, headless) | `grok login` once (xAI subscription; `curl -fsSL https://grok.com/install.sh \| bash` installs it). Detected from `~/.grok/auth.json` — NEVER `XAI_API_KEY` (per-token API; the FIA strips it) | `grok-4.6` / `grok-4.5` (`grok models`); `effort: low\|medium\|high\|xhigh` (no max). The first grok run trusts the project folder once so the FIA hooks apply |
 
-Pi API-key providers (any of them, per agent): `openrouter/…` (OPENROUTER_API_KEY — one key, every model), `xai/…` (XAI_API_KEY — Grok), `groq/…`, `google/…` (GEMINI_API_KEY), `fireworks/…`, `deepseek/…`, `mistral/…` and more (see Pi providers doc). List models inside `pi` with `/model`.
+Pi API-key providers (any of them, per agent): `openrouter/…` (OPENROUTER_API_KEY — one key, every model), `xai/…` (XAI_API_KEY — Grok through the API, per token; the subscription route is the `grok` engine above), `groq/…`, `google/…` (GEMINI_API_KEY), `fireworks/…`, `deepseek/…`, `mistral/…` and more (see Pi providers doc). List models inside `pi` with `/model`.
 
 Rule of thumb: heavy reasoning (planner, reviewer) on a frontier model; volume work (builder, scout, documenter) on a fast/cheap one — different providers in the SAME run is the point.
 

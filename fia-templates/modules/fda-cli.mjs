@@ -1,10 +1,12 @@
 import { parseArgs } from 'node:util';
 import { basename } from 'node:path';
 import Database from 'better-sqlite3';
+import { join } from 'node:path';
 import { loadConfig, validate } from './agents.mjs';
 import { ensure } from './session.mjs';
 import { classifyFailure, outcomeIsSuccess, outcomeLabel } from './outcome.mjs';
 import { resolvePrompt } from './utils.mjs';
+import { applyLlmOverrides, describeLlm, readLlmOverride, writeLlmOverride } from './llm-target.mjs';
 
 export function parseFdaArgs(argv, { agentDefault } = {}) {
   const { values, positionals } = parseArgs({
@@ -15,17 +17,22 @@ export function parseFdaArgs(argv, { agentDefault } = {}) {
       resume: { type: 'boolean', default: false },
       'retry-unchanged': { type: 'boolean', default: false },
       agent: { type: 'string', default: agentDefault },
+      llm: { type: 'string', multiple: true },
       debug: { type: 'boolean', default: false },
       help: { type: 'boolean', short: 'h' },
     },
     allowPositionals: true,
   });
   if (values.help) {
-    console.log('Usage: node imp/fda_*.mjs "<prompt>" [--config imp/fia.config.yaml] [--fda-id id] [--resume] [--debug]');
+    console.log('Usage: node imp/fda_*.mjs "<prompt>" [--config imp/fia.config.yaml] [--fda-id id] [--resume] [--llm "<spec>"] [--debug]');
     console.log('  --resume  with --fda-id: skip phases that already succeeded in that run (reuses saved results).');
     console.log('            The prompt may be omitted — the one saved with the original run is reused.');
     console.log('  --retry-unchanged  with --resume: override the unchanged-tree guard (a failed run');
     console.log('            whose tree has not moved is otherwise refused — re-running cannot pass).');
+    console.log('  --llm "<spec>"  run THIS run on another LLM without touching imp/fia.config.yaml.');
+    console.log('            <spec> = [agent[,agent]=]<model>[ <level>]  — e.g. --llm "grok-4.6 high"');
+    console.log('            (every agent), --llm "builder=opus xhigh", --llm "reviewer=openai-codex/gpt-5.6-sol".');
+    console.log('            Repeatable; saved with the run so --resume keeps the same LLM.');
     console.log('  --debug   print the full technical stack trace when a run fails');
     console.log('  Agent phases get 1 automatic correction round by default when a gate fails (retries: 1).');
     process.exit(0);
@@ -47,8 +54,47 @@ export function parseFdaArgs(argv, { agentDefault } = {}) {
     resume: values.resume,
     retryUnchanged: values['retry-unchanged'],
     agent: values.agent,
+    llm: (values.llm || []).map((s) => String(s).trim()).filter(Boolean),
     debug: values.debug,
   };
+}
+
+/** The run's session dir before a Run exists (same layout runner.mjs uses). */
+function sessionDirOf(cfg, fdaId) {
+  return join(cfg.defaults?.data_dir || 'imp/data', 'sessions', fdaId);
+}
+
+/**
+ * Run-scoped LLM override — `--llm` on the command line, or the override
+ * saved with the run when this is a `--resume` without one (the engine
+ * session and its cache only survive when the model stays the same across
+ * attempts). MUTATES the loaded cfg (the run's copy — the YAML is never
+ * written) and prints every switch before the run starts. Returns the
+ * decisions (empty when nothing was overridden).
+ */
+export function applyRunLlm(cfg, args) {
+  let specs = args.llm || [];
+  let source = 'flag';
+  if (!specs.length && args.resume && args.fdaId) {
+    const saved = readLlmOverride(sessionDirOf(cfg, args.fdaId));
+    if (saved?.specs?.length) {
+      specs = saved.specs;
+      source = 'saved';
+    }
+  }
+  if (!specs.length) return { specs, decisions: [], source };
+  const decisions = applyLlmOverrides(cfg, specs);
+  console.log(
+    source === 'saved'
+      ? `  ⚙ LLM override re-applied from run ${args.fdaId} (this run only — the roster is untouched):`
+      : '  ⚙ LLM override for THIS run only (imp/fia.config.yaml is untouched):',
+  );
+  for (const d of decisions) {
+    const fromLevel = d.from.level ? ` (${d.from.level})` : '';
+    const toLevel = d.to.level ? ` · ${d.to.coding_agent === 'pi' ? 'thinking' : 'effort'} ${d.to.level}` : '';
+    console.log(`     ${d.agent}: ${d.from.coding_agent} · ${d.from.model}${fromLevel}  →  ${d.to.coding_agent} · ${d.to.model}${toLevel}`);
+  }
+  return { specs, decisions, source };
 }
 
 export function phaseParams(name, kind, owner, description, extra = {}) {
@@ -134,12 +180,34 @@ export async function runFda(main, { agents = [], agentDefault } = {}) {
         process.exit(1);
       }
     }
+    // Run-scoped LLM override BEFORE validation and engine resolution: the
+    // overridden engine is what gets validated, fallback-resolved and traced.
+    const llm = applyRunLlm(cfg, args);
     const required = typeof agents === 'function' ? agents(args) : agents;
     if (required.length) validate(cfg, required);
     run = ensure(cfg, args.fdaId, { resume: args.resume, retryUnchanged: args.retryUnchanged });
     // Surfaced on the run so gates deep in the phase flow (ui_verify) can
     // honor the same override without re-parsing argv.
     run.retryUnchanged = args.retryUnchanged;
+    if (llm.decisions.length) {
+      // Saved with the run (so --resume re-applies it) and traced per agent —
+      // the Agents tab and the per-LLM ledger already stamp the EFFECTIVE
+      // model on every agent_start/agent_end; this event records WHY.
+      writeLlmOverride(run.sessionDir, { specs: llm.specs, decisions: llm.decisions });
+      for (const d of llm.decisions) {
+        run.tracer.event({
+          fda_id: run.fdaId,
+          phase_id: '',
+          type: 'log',
+          name: 'llm_override',
+          payload: { agent: d.agent, from: d.from, to: d.to, level_given: d.level_given, spec: d.spec, source: llm.source },
+        });
+      }
+      run.llmOverride = llm.decisions;
+      run.console.note(
+        `LLM override active for ${llm.decisions.map((d) => `${d.agent} → ${describeLlm(cfg.agents.find((a) => a.name === d.agent))}`).join('; ')}`,
+      );
+    }
     const prompt = resolvePrompt(args.prompt);
     const exitCode = await main({ run, cfg, prompt, args });
     await announceRunEnd(run, cfg);
