@@ -1371,8 +1371,11 @@ as disproportionate.
   CURRENT tree; succeeded agent phases are reused. Three deliberate
   exceptions: `ui_verify` always re-runs (a verdict about the current tree
   must not fossilize a rejection); `fda_bug`'s `red_check` replays its saved
-  verdict once the fix has been built (a one-way gate — re-running would
-  misread the fixed code as "bug not reproduced"); `fda_quick`'s `quicklog`
+  proof whenever the reproduction itself is replayed (a one-way gate bound to
+  the REPRODUCTION, not to a saved `build` result — so a builder round that
+  ended `status=fail` after applying the fix, or a verdict `--redo build`,
+  no longer closes the resume as "bug not reproduced"; a `--redo red_test`
+  writes a new reproduction and is validated again); `fda_quick`'s `quicklog`
   reuses the entry it already appended (the append is not idempotent).
 - **Agent phases retry once by default** (`retries: 1`) before failing the run.
 - **A run may stop ITSELF, on purpose.** Four zero-token limits (repair cap,
@@ -1457,7 +1460,12 @@ as disproportionate.
   ends.
 - **FIA commits are scoped**: FDAs commit only the files declared in the
   agent's envelope (never `git add -A`), so rejected builder changes and your
-  own uncommitted work stay out of FIA commits.
+  own uncommitted work stay out of FIA commits. Every builder round's
+  declaration is kept in `imp/data/sessions/<id>/declared_files.json` —
+  rounds that ended `status=fail` or failed a gate included — so a fix the
+  builder applied before reporting failure is still committed by the round
+  that finally goes green, instead of lingering as uncommitted dirt
+  (`changed_by_run_but_uncommitted` in the trace names anything left).
 - **Run baseline (anti-contamination)**: when a run starts, the runtime takes
   a pre-flight photo of the working tree (content fingerprint per dirty path,
   persisted as `imp/data/sessions/<id>/baseline.json`, reloaded verbatim on
