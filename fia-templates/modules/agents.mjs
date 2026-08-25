@@ -15,6 +15,7 @@ import { OUTCOMES } from './outcome.mjs';
 import { makeStreamRecorder } from './stream-events.mjs';
 import { extractJson, getOutputSchema } from './envelopes.mjs';
 import { gateReport } from './gates.mjs';
+import { recordDeclaredFiles } from './utils.mjs';
 
 const JSON_FIX_ATTEMPTS = 2;
 const PHASE_OVERRIDE_FIELDS = new Set(['thinking', 'effort']);
@@ -810,6 +811,18 @@ async function attemptPhase(run, phase, call, agent, agentDir, systemText, userT
     return result;
   };
 
+  // The envelope's declaration (changed_files + artifacts) outlives the
+  // round's outcome — see utils.recordDeclaredFiles.
+  const noteDeclaration = (envelope) =>
+    recordDeclaredFiles(run, {
+      phase: phase.params?.name,
+      phase_id: phase.phase_id,
+      agent: agent.name,
+      status: envelope?.status,
+      changed_files: envelope?.changed_files,
+      artifacts: envelope?.artifacts,
+    });
+
   try {
     let result = await doSend(userText);
     let { envelope, attempt } = await parseWithRetries(run, phase, call, result, doSend);
@@ -832,6 +845,7 @@ async function attemptPhase(run, phase, call, agent, agentDir, systemText, userT
       }
       if (!violations.length) break;
       if (gateAttempt > (phase.params.retries || 0)) {
+        noteDeclaration(envelope);
         throw new GateFailure(`${agent.name} failed gates:\n- ${violations.join('\n- ')}`);
       }
       const correction =
@@ -844,6 +858,11 @@ async function attemptPhase(run, phase, call, agent, agentDir, systemText, userT
 
     enforced = true;
     permissions.enforce(run, phase, agent, treeBefore);
+    // Recorded BEFORE the status check below: a builder that applied its work
+    // and then reported status=fail leaves those files in the tree, and only
+    // this ledger tells the commit phase they are the run's (phase_results is
+    // written by the runner on success only — see utils.builderDeclaredFiles).
+    noteDeclaration(envelope);
 
     writeFileSync(
       join(agentDir, 'envelope.json'),

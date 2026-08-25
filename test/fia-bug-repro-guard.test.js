@@ -35,3 +35,23 @@ test('the reproduction check cannot run on a red suite (no double-charging the f
   const focal = phase.indexOf('runFocalTests(run, redFiles)');
   assert.ok(green > -1 && focal > green, 'the focal re-run happens inside the green branch only');
 });
+
+test('the RED gate replays its proof by reproduction identity — never by whether build.json exists', () => {
+  // A saved `build` result is the wrong key: a builder round that reports
+  // status=fail after applying the fix saves nothing, and a verdict
+  // `--redo build` deletes it on purpose. Both used to dead-end the resume
+  // as "bug not reproduced" (a real run spent 2 of its 4 recoveries on it).
+  assert.doesNotMatch(FDA_BUG, /phaseAlreadyRan\(run, 'build'\)/, 'build.json must not gate the replay');
+  assert.match(FDA_BUG, /const redReplayed = run\.replayed > replayedBeforeRed;/, 'the key is whether red_test was replayed');
+  assert.match(FDA_BUG, /replayableRedProof\(\{ redReplayed, proof: savedPhaseResult\(run, 'red_check'\), redKey \}\)/);
+  assert.match(FDA_BUG, /return \{ \.\.\.result, red: reason, proof_of: redKey \};/, 'the proof is bound to the reproduction');
+  assert.match(
+    FDA_BUG,
+    /if \(!redReplayed\) rmSync\(join\(run\.phaseResultsDir, 'red_check\.json'\), \{ force: true \}\);/,
+    'a fresh reproduction drops the stale proof before validating',
+  );
+});
+
+test('the commit names what the run changed but did not commit, like the other tested FDAs', () => {
+  assert.match(FDA_BUG, /changed_by_run_but_uncommitted/);
+});

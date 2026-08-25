@@ -518,3 +518,27 @@ export function verdictConsistent(envelope) {
   );
   return report;
 }
+
+/**
+ * fda_bug's ONE-WAY gate on --resume. The reproduction is proven RED once —
+ * before any fix — and its proof (the saved red_check result) is bound to the
+ * reproduction it proved. Once the fix is on disk the reproduction PASSES, so
+ * re-validating would close the run as "bug not reproduced": a dead end that
+ * spends a recovery for zero tokens. The proof is replayable when the
+ * reproduction itself was replayed (red_test reused from disk) — regardless
+ * of whether `build` saved a result: a builder round that reported
+ * `status=fail` after applying the fix, and a verdict `--redo build`, both
+ * leave no build.json, and both used to dead-end here. A red_test that
+ * EXECUTED wrote a new reproduction; it must be validated, never replayed.
+ *
+ * `proof.proof_of` is the key of the red_test result the proof belongs to
+ * (utils.savedPhaseKey); a proof without one was written by an older runtime
+ * and is accepted on a replayed reproduction (there was only ever one).
+ * Returns the proof to replay, or null when the gate must run.
+ */
+export function replayableRedProof({ redReplayed = false, proof = null, redKey = null } = {}) {
+  if (!redReplayed) return null;
+  if (!proof || proof.red?.valid !== true) return null;
+  if (proof.proof_of !== undefined && proof.proof_of !== null && proof.proof_of !== redKey) return null;
+  return proof;
+}

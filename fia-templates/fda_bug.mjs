@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 /** FDA Bug — plan → failing reproduction (valid RED) → fix → green suite → commit. */
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { runFda, phaseParams } from './modules/fda-cli.mjs';
-import { artifactsExist, filesNonEmpty, validateRedReason, parseSpecLine, checkSpecCoverage, checkSpecDiagram } from './modules/gates.mjs';
+import {
+  artifactsExist,
+  filesNonEmpty,
+  validateRedReason,
+  replayableRedProof,
+  parseSpecLine,
+  checkSpecCoverage,
+  checkSpecDiagram,
+} from './modules/gates.mjs';
 import { resolveBriefPath, runChecklistGate } from './modules/checklist.mjs';
 import { runUiGate } from './modules/ui-gate.mjs';
 import { runTestsForBrief, runFocalTests, asEnvelope } from './modules/quality.mjs';
@@ -11,16 +19,11 @@ import { floorPath } from './modules/floor.mjs';
 import { runSpecDeliveryClose } from './modules/spec-lifecycle.mjs';
 import { OUTCOMES } from './modules/outcome.mjs';
 import { changedContentSignature, createRepairTracker } from './modules/stop.mjs';
-import { builderDeclaredFiles } from './modules/utils.mjs';
+import { builderDeclaredFiles, savedPhaseKey } from './modules/utils.mjs';
 import * as git from './modules/git-helper.mjs';
 
 /** This runner's builder rounds include the RED reproduction test. */
 const BUG_RESULT_FILES = /^(red_test|build|fix_\d+|fix_checklist|fix_ui)\.json$/;
-
-/** A phase that already ran in this fda_id (its result file is on disk). */
-function phaseAlreadyRan(run, name) {
-  return existsSync(join(run.phaseResultsDir, `${name}.json`));
-}
 
 /** The persisted result of an earlier phase of this fda_id, or null. */
 function savedPhaseResult(run, name) {
@@ -59,23 +62,41 @@ await runFda(
       '',
       `Bug report:\n${prompt}`,
     ].join('\n');
+    // Whether the reproduction below is REPLAYED (reused from disk) or written
+    // fresh decides what red_check does with its saved proof — see there.
+    const replayedBeforeRed = run.replayed;
     const red = await run.runPhase(
       phaseParams('red_test', 'agent', 'builder', 'Write ONLY the failing reproduction test — no production code'),
       async (ph) => ph.call({ outputType: 'BuildOutput', prompt: redPrompt, previous: plan, gates: [artifactsExist] }),
     );
+    const redReplayed = run.replayed > replayedBeforeRed;
+    const redKey = savedPhaseKey(run, 'red_test');
     const redFiles = [...new Set([...(red.changed_files || []), ...(red.artifacts || [])])];
 
     const redCheck = await run.runPhase(
       phaseParams('red_check', 'code', 'quality', 'Prove the reproduction fails for the right reason before any fix'),
       async (ph) => {
         // `code` phases always re-run on resume — right for suites and commits,
-        // wrong here: this is a ONE-WAY gate. Once `build` applied the fix the
-        // reproduction PASSES, and re-running would fail the run as "bug not
-        // reproduced". The verdict was already proven; replay it.
-        if (run.resume && phaseAlreadyRan(run, 'build')) {
-          const saved = savedPhaseResult(run, 'red_check');
-          ph.log({ reproduced: true, note: 'already proven before the fix — skipped on resume' });
-          return saved ?? { passed: false, checks: [], failures: [], artifacts: [] };
+        // wrong here: this is a ONE-WAY gate. Once the fix is on disk the
+        // reproduction PASSES, and re-running would close the run as "bug not
+        // reproduced" — a dead end that spends a recovery for zero tokens. The
+        // proof is bound to the REPRODUCTION, not to a saved `build` result: a
+        // builder round that reported status=fail after applying the fix, and
+        // a verdict `--redo build`, both leave no build.json, and both used to
+        // dead-end here (twice in one real run, 2 of its 4 recoveries). Replay
+        // the proof whenever the reproduction itself was replayed; validate
+        // whenever red_test wrote a new one (`--redo red_test`), dropping the
+        // stale proof first so a failed validation can never be mistaken for
+        // it on a later resume.
+        if (!redReplayed) rmSync(join(run.phaseResultsDir, 'red_check.json'), { force: true });
+        const proof = replayableRedProof({ redReplayed, proof: savedPhaseResult(run, 'red_check'), redKey });
+        if (proof) {
+          ph.log({
+            reproduced: true,
+            classification: proof.red.classification,
+            note: 'already proven for this reproduction before the fix — replayed on resume',
+          });
+          return proof;
         }
         const result = await runFocalTests(run, redFiles);
         if (result.passed) {
@@ -84,7 +105,7 @@ await runFda(
         const reason = validateRedReason(result.checks.map((c) => c.output_tail).join('\n'));
         if (!reason.valid) throw new Error(`invalid RED (${reason.classification}): ${reason.note}`);
         ph.log({ reproduced: true, classification: reason.classification, files: redFiles.join(', ') });
-        return { ...result, red: reason };
+        return { ...result, red: reason, proof_of: redKey };
       },
     );
 
@@ -270,6 +291,10 @@ await runFda(
           const { sha, committed, excluded } = git.commitPaths(message, paths, run.repoRoot, { baseline: run.baseline });
           ph.log({ sha: sha || '(nothing to commit)', message, files: committed.length });
           if (excluded.length) ph.log({ excluded_pre_existing: excluded.join(', ') });
+          // Same visibility as the other tested FDAs: run-owned paths the
+          // commit did not take are named in the trace, never dropped silently.
+          const leftover = git.runChangedPaths(run.repoRoot, run.baseline);
+          if (leftover.length) ph.log({ changed_by_run_but_uncommitted: leftover.join(', ') });
         },
       );
     }
