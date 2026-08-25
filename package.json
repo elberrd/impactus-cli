@@ -1,6 +1,6 @@
 {
   "name": "impactus",
-  "version": "2.0.0-alpha.22",
+  "version": "2.0.0-alpha.23",
   "description": "IMPACTUS CLI — the IAI installer: agent harness + FIA (the IAI Agent Factory) with Pi, deterministic FDAs and Claude/Codex subscription auth.",
   "type": "module",
   "bin": {
